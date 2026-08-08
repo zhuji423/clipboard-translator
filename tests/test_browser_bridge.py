@@ -28,6 +28,7 @@ def _request(method: str, url: str, data: dict | None = None, headers: dict | No
 def test_bridge_health_pair_lookup_and_auth() -> None:
     state = {"token": "", "enabled": True, "port": 17991}
     lookups: list[tuple[str, str, str]] = []
+    translates: list[str] = []
 
     def provider() -> BridgeConfig:
         return BridgeConfig(enabled=state["enabled"], port=state["port"], token=state["token"])
@@ -45,10 +46,14 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
             "meaning_in_context": "语境测试",
         }
 
+    def on_translate(text: str) -> None:
+        translates.append(text)
+
     bridge = BrowserBridge(
         config_provider=provider,
         target_lang_provider=lambda: "zh",
         on_lookup=on_lookup,
+        on_translate=on_translate,
         on_token_saved=on_token,
     )
     bridge.start()
@@ -91,6 +96,16 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
         assert status == 200
         assert ok["meaning_in_context"] == "语境测试"
         assert lookups == [("hello", "hello world", "zh")]
+
+        status, translated = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/translate",
+            {"text": "hello world phrase"},
+            headers={"Authorization": f"Bearer {state['token']}"},
+        )
+        assert status == 200
+        assert translated["ok"] is True
+        assert translates == ["hello world phrase"]
 
         # Must bind loopback only
         assert bridge._server is not None

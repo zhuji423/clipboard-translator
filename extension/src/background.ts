@@ -5,6 +5,7 @@ import {
   LookupResponse,
   PairResponse,
   STORAGE_KEYS,
+  TranslateResponse,
   bridgeBase,
   loadSettings,
 } from "./shared";
@@ -23,6 +24,9 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
   }
   if (message.type === "LOOKUP") {
     return lookup(message.word, message.context, message.requestId);
+  }
+  if (message.type === "TRANSLATE") {
+    return translate(message.text, message.requestId);
   }
   return { type: "HEALTH_RESULT", ok: false, paired: false, online: false, error: "unknown message" };
 }
@@ -154,6 +158,54 @@ async function lookup(
   } catch {
     return {
       type: "LOOKUP_RESULT",
+      requestId,
+      ok: false,
+      error: "桌面端离线或请求超时",
+    };
+  }
+}
+
+async function translate(text: string, requestId: string): Promise<TranslateResponse> {
+  const settings = await loadSettings();
+  if (!settings.enabled) {
+    return {
+      type: "TRANSLATE_RESULT",
+      requestId,
+      ok: false,
+      error: "扩展已暂停（可在弹窗中重新启用）",
+    };
+  }
+  if (!settings.token) {
+    return {
+      type: "TRANSLATE_RESULT",
+      requestId,
+      ok: false,
+      error: "尚未配对桌面端",
+    };
+  }
+  try {
+    const resp = await fetch(`${bridgeBase(settings.port)}/v1/translate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${settings.token}`,
+      },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = (await resp.json()) as { ok?: boolean; error?: string };
+    if (!resp.ok || !data.ok) {
+      return {
+        type: "TRANSLATE_RESULT",
+        requestId,
+        ok: false,
+        error: String(data.error || `翻译请求失败（HTTP ${resp.status}）`),
+      };
+    }
+    return { type: "TRANSLATE_RESULT", requestId, ok: true };
+  } catch {
+    return {
+      type: "TRANSLATE_RESULT",
       requestId,
       ok: false,
       error: "桌面端离线或请求超时",

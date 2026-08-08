@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import webbrowser
 from pathlib import Path
@@ -175,6 +176,7 @@ class UpdateDownloadWorker(QObject):
 class AppController(QObject):
     bridge_token_changed = Signal(str)
     bridge_lookup_recorded = Signal()
+    bridge_translate_requested = Signal(str)
 
     def __init__(self, cfg: Config, window: TranslatorWindow) -> None:
         super().__init__()
@@ -213,10 +215,12 @@ class AppController(QObject):
         self._settings_dialog: SettingsDialog | None = None
         self.bridge_token_changed.connect(self._apply_bridge_token_on_ui)
         self.bridge_lookup_recorded.connect(self.refresh_billing)
+        self.bridge_translate_requested.connect(self._on_bridge_translate_requested)
         self._bridge = BrowserBridge(
             config_provider=self._bridge_config,
             target_lang_provider=lambda: self._cfg.app.target_lang,
             on_lookup=self._bridge_lookup,
+            on_translate=lambda text: self.bridge_translate_requested.emit(text),
             on_token_saved=lambda token: self.bridge_token_changed.emit(token),
         )
 
@@ -259,6 +263,15 @@ class AppController(QObject):
         )
         if self._settings_dialog is not None:
             self._settings_dialog.set_bridge_paired(bool(token))
+
+    @Slot(str)
+    def _on_bridge_translate_requested(self, text: str) -> None:
+        """Apply extension phrase selection on the UI thread (same as clipboard)."""
+        normalized = self._normalize_clipboard_text(text)
+        if normalized is None:
+            return
+        self._abort_clipboard_pending()
+        self._apply_clipboard_text(normalized)
 
     def _bridge_lookup(self, word: str, context: str, target_lang: str) -> dict:
         word = normalize_word(word)
@@ -672,7 +685,7 @@ class AppController(QObject):
     def _normalize_clipboard_text(self, raw: str | None) -> str | None:
         if raw is None:
             return None
-        text = raw.strip()
+        text = re.sub(r"\s+", " ", raw).strip()
         if not text:
             return None
         if len(text) < self._cfg.app.min_chars:

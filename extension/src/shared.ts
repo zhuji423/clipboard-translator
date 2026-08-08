@@ -50,13 +50,28 @@ export type PairResponse = {
   port?: number;
 };
 
+export type TranslateRequest = {
+  type: "TRANSLATE";
+  text: string;
+  requestId: string;
+};
+
+export type TranslateResponse = {
+  type: "TRANSLATE_RESULT";
+  requestId: string;
+  ok: boolean;
+  error?: string;
+};
+
 export type ExtensionMessage =
   | LookupRequest
   | LookupResponse
   | HealthRequest
   | HealthResponse
   | PairRequest
-  | PairResponse;
+  | PairResponse
+  | TranslateRequest
+  | TranslateResponse;
 
 export async function loadSettings(): Promise<BridgeSettings> {
   const data = await chrome.storage.local.get([

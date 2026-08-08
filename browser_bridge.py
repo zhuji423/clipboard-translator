@@ -31,6 +31,7 @@ class PairingSession:
 
 
 LookupHandler = Callable[[str, str, str], dict[str, Any]]
+TranslateHandler = Callable[[str], None]
 ConfigProvider = Callable[[], BridgeConfig]
 TargetLangProvider = Callable[[], str]
 
@@ -44,11 +45,13 @@ class BrowserBridge:
         config_provider: ConfigProvider,
         target_lang_provider: TargetLangProvider,
         on_lookup: LookupHandler,
+        on_translate: TranslateHandler | None = None,
         on_token_saved: Callable[[str], None] | None = None,
     ) -> None:
         self._config_provider = config_provider
         self._target_lang_provider = target_lang_provider
         self._on_lookup = on_lookup
+        self._on_translate = on_translate
         self._on_token_saved = on_token_saved
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
@@ -266,6 +269,27 @@ class BrowserBridge:
                         self._send(502, {"error": str(exc)})
                         return
                     self._send(200, {"ok": True, **result})
+                    return
+
+                if path == "/v1/translate":
+                    if not bridge._authorized(dict(self.headers)):
+                        self._send(401, {"error": "未授权：请先在扩展中完成与桌面端的配对"})
+                        return
+                    if bridge._on_translate is None:
+                        self._send(501, {"error": "桌面端未启用划词整段翻译"})
+                        return
+                    text = str(data.get("text") or "").strip()
+                    if not text:
+                        self._send(400, {"error": "text 不能为空"})
+                        return
+                    if len(text) > 8000:
+                        text = text[:8000]
+                    try:
+                        bridge._on_translate(text)
+                    except Exception as exc:  # noqa: BLE001
+                        self._send(502, {"error": str(exc)})
+                        return
+                    self._send(200, {"ok": True})
                     return
 
                 self._send(404, {"error": "not found"})

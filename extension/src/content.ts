@@ -1,6 +1,6 @@
 import { YouTubeAdapter } from "./adapters/youtube";
 import { SubtitleOverlay } from "./overlay";
-import type { LookupResponse } from "./shared";
+import type { LookupResponse, TranslateResponse } from "./shared";
 
 const adapter = new YouTubeAdapter();
 const overlay = new SubtitleOverlay();
@@ -70,6 +70,57 @@ overlay.mountClickHandler(({ word, context, anchor }) => {
     },
   );
 });
+
+overlay.mountPhraseSelectHandler(({ text }) => {
+  void sendPhraseToDesktop(text);
+});
+
+async function sendPhraseToDesktop(text: string): Promise<void> {
+  const value = text.replace(/\s+/g, " ").trim();
+  if (!value) return;
+
+  // Best-effort clipboard sync (may not notify Qt on some browsers).
+  void writeClipboardText(value).catch(() => undefined);
+
+  const requestId = `t${Date.now()}`;
+  chrome.runtime.sendMessage(
+    { type: "TRANSLATE", text: value, requestId },
+    (response: TranslateResponse | undefined) => {
+      if (chrome.runtime.lastError) {
+        overlay.showToast(chrome.runtime.lastError.message || "扩展通信失败");
+        return;
+      }
+      if (!response?.ok) {
+        overlay.showToast(response?.error || "未能唤起桌面翻译");
+        return;
+      }
+      overlay.showToast("已发送到桌面端翻译…");
+    },
+  );
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // fall through to legacy copy
+    }
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  ta.style.top = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  if (!ok) throw new Error("execCommand copy failed");
+}
 
 adapter.hideNativeCaptions(true);
 adapter.start((cue) => {

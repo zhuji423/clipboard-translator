@@ -11,6 +11,7 @@ Chrome/Edge 扩展在 YouTube 字幕上点词暂停并查义；API Key 与 LLM �
 | GET | `/health` | 无 | 探测桌面是否在线、是否已有 token |
 | POST | `/v1/pair` | 无（一次性短码） | body: `{ "code": "123456" }` → `{ token, port }` |
 | POST | `/v1/lookup` | `Authorization: Bearer <token>` | body: `{ word, context, target_lang? }` |
+| POST | `/v1/translate` | `Authorization: Bearer <token>` | body: `{ text }` → 桌面主窗整段翻译（划词） |
 
 配对码默认 120 秒有效；令牌写入桌面 `config.toml` 的 `[bridge].token` 与扩展 `chrome.storage.local`。
 
