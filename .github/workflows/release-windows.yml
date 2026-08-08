@@ -55,6 +55,7 @@ jobs:
         shell: bash
         run: |
           python -m PyInstaller --noconfirm --clean clipboard_translator.spec
+          python -m PyInstaller --noconfirm --clean native_host/bridge_host.spec
 
       - name: Stage portable artifact
         shell: pwsh
@@ -64,9 +65,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist\portable | Out-Null
           Copy-Item dist\ClipboardTranslator.exe "dist\portable\ClipboardTranslator-$Version-portable.exe"
           Copy-Item dist\ClipboardTranslator.exe "dist\portable\ClipboardTranslator-$Version-$Sha-portable.exe"
+          if (-not (Test-Path "dist\ClipboardTranslatorNmHost.exe")) {
+            throw "Missing dist\ClipboardTranslatorNmHost.exe"
+          }
+          Copy-Item dist\ClipboardTranslatorNmHost.exe "dist\portable\ClipboardTranslatorNmHost.exe"
+          Copy-Item dist\ClipboardTranslatorNmHost.exe "dist\portable\ClipboardTranslator-$Version-NmHost.exe"
+          Copy-Item dist\ClipboardTranslatorNmHost.exe "dist\portable\ClipboardTranslator-$Version-$Sha-NmHost.exe"
           if (-not (Test-Path "dist\app\ClipboardTranslator.exe")) {
             throw "Missing dist\app\ClipboardTranslator.exe"
           }
+          Copy-Item dist\ClipboardTranslatorNmHost.exe "dist\app\ClipboardTranslatorNmHost.exe"
 
       - name: Build browser extension zip
         shell: pwsh
@@ -130,8 +138,8 @@ jobs:
           NOTES="Automated preview build from \`${GITHUB_SHA}\` (v${VERSION}).
 
           Artifacts:
-          - \`ClipboardTranslator-${VERSION}-${SHA}-portable.exe\`
-          - \`ClipboardTranslator-${VERSION}-${SHA}-Setup.exe\`
+          - \`ClipboardTranslator-${VERSION}-${SHA}-Setup.exe\` (recommended; includes NmHost)
+          - \`ClipboardTranslator-${VERSION}-${SHA}-portable.exe\` + \`...-NmHost.exe\` (place both in same folder)
           - \`ClipboardTranslator-extension-${VERSION}-${SHA}.zip\`
           - \`ClipboardTranslator-${VERSION}-${SHA}-macos.zip\` (uploaded by macOS workflow when ready)
 
@@ -139,7 +147,7 @@ jobs:
           - Windows: \`%APPDATA%\\ClipboardTranslator\`
           - macOS: \`~/Library/Application Support/ClipboardTranslator\`
 
-          Browser extension: unzip and load \`extension/dist\` contents via Chrome/Edge developer mode (see README).
+          Browser extension: open the onboarding guide from the app, or use the Chrome/Edge store Unlisted link when available. Zip + developer mode remains a fallback (see README).
           "
           # Recreate so old SHA-named assets do not accumulate.
           gh release delete preview --yes || true
@@ -151,6 +159,7 @@ jobs:
             --title "Preview ${VERSION} (${SHA})" \
             --notes "$NOTES" \
             "dist/portable/ClipboardTranslator-${VERSION}-${SHA}-portable.exe" \
+            "dist/portable/ClipboardTranslator-${VERSION}-${SHA}-NmHost.exe" \
             "dist/ClipboardTranslator-${VERSION}-${SHA}-Setup.exe" \
             "dist/extension/ClipboardTranslator-extension-${VERSION}-${SHA}.zip"
 
@@ -171,5 +180,6 @@ jobs:
             --title "Clipboard Translator ${VERSION}" \
             --notes-file release-notes.md \
             "dist/portable/ClipboardTranslator-${VERSION}-portable.exe" \
+            "dist/portable/ClipboardTranslator-${VERSION}-NmHost.exe" \
             "dist/ClipboardTranslator-${VERSION}-Setup.exe" \
             "dist/extension/ClipboardTranslator-extension-${VERSION}.zip"

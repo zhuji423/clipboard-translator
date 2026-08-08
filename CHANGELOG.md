@@ -4,6 +4,35 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 文档与计划统一迁入 `docs/`：设计说明、历史计划归档、未做功能目录 `docs/todo/` 与「版本↔计划↔完成工作」对照表；根目录不再放置 `PLAN-*.md`
+
+## [0.9.2] - 2026-08-08
+
+### Fixed
+
+- 开发人员模式「加载解压缩的扩展」时不再打开尚未部署的远程引导页（避免 404）
+
+## [0.9.1] - 2026-08-08
+
+### Changed
+
+- 扩展正式分发改为仅 **Microsoft Edge Add-ons**（不上架 Chrome Web Store）；引导页与「安装浏览器扩展」入口以 Edge 为准
+
+## [0.9.0] - 2026-08-08
+
+### Added
+
+- 打包版首次运行与设置/托盘提供「安装浏览器扩展」引导，打开本机状态探测引导页
+- Windows 安装程序可注册 Chrome/Edge Native Messaging，并附带 `ClipboardTranslatorNmHost`；扩展支持零点击自动配对（短码仍作兜底）
+- 扩展构建固定公钥以稳定扩展 ID；`onInstalled` 打开引导页；popup 区分自动连接 / 短码 / 离线状态
+- 默认启用本机桥接（`[bridge] enabled = true`），便于新用户装完扩展即可连接
+
+### Changed
+
+- 普通用户扩展分发路径改为「商店 Unlisted（上架后）+ 引导页」；开发者模式加载 zip 仅作过渡/开发备用
+
 ## [0.8.5] - 2026-08-08
 
 ### Fixed

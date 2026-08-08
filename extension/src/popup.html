@@ -66,13 +66,12 @@
         <input id="code" type="text" placeholder="桌面端配对码（6 位）" maxlength="8" />
       </div>
       <div class="row">
-        <button id="pairBtn">连接桌面端</button>
-        <button id="refreshBtn" class="secondary">刷新状态</button>
+        <button id="autoPairBtn">自动连接</button>
+        <button id="pairBtn">短码连接</button>
+        <button id="refreshBtn" class="secondary">刷新</button>
       </div>
-      <p class="hint">
-        1. 桌面端设置中启用「浏览器集成」并点「开始配对」<br />
-        2. 在此输入配对码<br />
-        3. 打开 YouTube 并开启字幕，点击单词即可查义
+      <p id="hint" class="hint">
+        安装桌面端后优先点「自动连接」；失败时在桌面端「开始配对」并在此输入 6 位码。
       </p>
     </main>
     <script src="popup.js"></script>

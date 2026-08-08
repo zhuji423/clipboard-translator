@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import webbrowser
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from browser_bridge import DEFAULT_BRIDGE_PORT
 from config import BridgeSettings, LlmConfig
+from distribution import preferred_extension_install_url
 
 
 @dataclass(frozen=True)
@@ -104,12 +106,16 @@ class SettingsDialog(QDialog):
 
         pair_row = QHBoxLayout()
         self.pair_btn = QPushButton("开始配对")
-        self.pair_btn.setToolTip("生成一次性短码，在浏览器扩展中输入以连接")
+        self.pair_btn.setToolTip("生成一次性短码，在浏览器扩展中输入以连接（自动配对失败时使用）")
         self.pair_btn.clicked.connect(self.start_pairing_requested.emit)
         self.revoke_btn = QPushButton("撤销配对")
         self.revoke_btn.clicked.connect(self.revoke_pairing_requested.emit)
+        self.install_ext_btn = QPushButton("安装浏览器扩展")
+        self.install_ext_btn.setToolTip("打开扩展安装引导页 / 商店链接")
+        self.install_ext_btn.clicked.connect(self._open_extension_install)
         pair_row.addWidget(self.pair_btn)
         pair_row.addWidget(self.revoke_btn)
+        pair_row.addWidget(self.install_ext_btn)
         pair_row.addStretch(1)
         layout.addLayout(pair_row)
 
@@ -189,6 +195,9 @@ class SettingsDialog(QDialog):
         self.bridge_status.setText("已配对" if paired else "未配对")
         if not paired:
             self.pair_code_label.setText("")
+
+    def _open_extension_install(self) -> None:
+        webbrowser.open(preferred_extension_install_url())
 
     def _toggle_key_visibility(self, checked: bool) -> None:
         mode = (

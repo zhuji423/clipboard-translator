@@ -6,6 +6,7 @@
 
 - 约束对象：本目录下的代码、配置示例、用户文档与版本记录
 - 不把变更史写进本文件；运行时版本与对外日志分别在 `version.py`、`CHANGELOG.md`
+- 仓库分区见 [`docs/REPOSITORY.md`](docs/REPOSITORY.md)
 
 ## 改代码
 
@@ -13,17 +14,34 @@
 - 只改任务需要的文件；不主动改 `config.toml` 中的密钥与个人配置
 - 用户可见行为变更（窗口、托盘、翻译流程、设置项）完成后应可本地运行验证
 - 需要重启常驻进程时：结束已有 `main.py` 再用项目 `.venv` 启动
+- 桌面端代码在仓库根目录 `*.py`；浏览器扩展只改 `extension/`
 
-## 写说明
+## 写说明与计划
 
 | 内容 | 写到哪里 |
 |------|----------|
-| 安装、运行、用户向用法 | `README.md` |
-| 设计方案、分阶段实施笔记 | `PLAN-*.md` |
+| 安装、运行、用户向用法 | 根目录 `README.md`（保持可扫读） |
+| 文档总索引 / 仓库分区 | `docs/README.md`、`docs/REPOSITORY.md` |
+| 版本 ↔ 计划 ↔ 完成工作 | **`docs/VERSION-PLANS.md`（每次升版必更新）** |
+| 长期设计说明 | `docs/plans/design/*.md` |
+| 迭代计划归档 | `docs/plans/history/<slug>.md`（文首 YAML） |
+| 未做功能与待排期计划 | `docs/todo/`（含 `README.md` 一览；完整计划正文同目录） |
+| 功能原理长文 | `docs/guides/*.md` |
 | Agent 如何改本仓库 | 本文件 `AGENTS.md` |
 | 对外变更史 | `CHANGELOG.md`（不要把变更史堆进 README） |
 
-用户向说明保持简短；过程性讨论放 `PLAN-*.md`，完成后不必把整份方案贴进 README。
+**禁止**：在仓库根目录新增 `PLAN-*.md` 或其它长篇计划；本机 `~/.cursor/plans/` 仅可作草稿，定稿必须入库 `docs/`（完成项 → `plans/history/`，未做项 → `todo/`）。
+
+计划区细则：[`docs/plans/README.md`](docs/plans/README.md)；未做功能：[`docs/todo/README.md`](docs/todo/README.md)。
+
+### 版本迭代时的计划义务
+
+对任何会升版的改动，同一次提交中还须：
+
+1. 将本次依据的计划写入 / 更新 `docs/plans/history/`（标注 `planned_for`、`implemented_in`、`status`）
+2. 更新 `docs/VERSION-PLANS.md` 对应版本：「用了哪些计划」「完成了哪些工作」
+3. 若有长期设计结论，同步 `docs/plans/design/`
+4. 未做完的后续项放入 `docs/todo/`，并更新 `docs/todo/README.md` 一览与 VERSION-PLANS 的 todo 表
 
 ## 升版与写日志
 
@@ -33,6 +51,7 @@
 
 1. `version.py` 中的 `__version__`（唯一版本源）
 2. `CHANGELOG.md` 顶部新增对应版本条目
+3. `docs/VERSION-PLANS.md`（计划对照；纯文档整理可只改该文件与 docs，不升版）
 
 托盘提示等若展示版本号，须与 `version.py` 一致（通常通过 `from version import __version__`）。
 
@@ -73,7 +92,9 @@
 
 - [ ] 行为相关改动已同步升高 `version.py`
 - [ ] `CHANGELOG.md` 有对应条目与日期
+- [ ] 若本次升版：已更新 `docs/VERSION-PLANS.md` 与计划归档
 - [ ] 若 UI/托盘展示版本号，与 `version.py` 一致
 - [ ] 用户向用法有变时，已更新 `README.md`
+- [ ] 长文 / 计划只出现在 `docs/`，未在根目录堆 `PLAN-*`
 - [ ] 未把密钥或本机路径写进示例配置与文档
 - [ ] 若本次应出正式包：已升版，push `main` 后由 CI 打 tag / Release

@@ -7,6 +7,16 @@ const root = dirname(fileURLToPath(import.meta.url));
 const dist = join(root, "dist");
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 
+// Keep in sync with distribution.py
+const EXTENSION_PUBLIC_KEY_B64 =
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr7KUU3FDDEtfi3HuU/2jqSjlp3tfl0L+" +
+  "y1OIBCG19NuAZ/WCpIZKc4JZSn9Bgd2YGmPRD046Quzz8rCN5yMNmuQisBEl3FXDRGj8Wk/HPDVI" +
+  "OtMlhw5Z96YDtqFGn0U5Ma5atzXduv6EAH8g3R54JvMwNd6a9/aBXmkhQD4qLZ/0C414134iAi/" +
+  "zevMAJpcXQnqFn5vc3L0Rr1HzZAWG+UN9ajzKaHejknaSy8zuhqJ7zVB/vG8PH/LTeyxVj2JBfa" +
+  "4AJuKyVUVxDv+kln/6FNHZDNfPB1pucw1Ii1pB2GPM1iUfMTTzcM2qAixNADlt4Sxa03q91ICsj" +
+  "WrPPXwBsQIDAQAB";
+const ONBOARDING_URL = "https://zhuji423.github.io/clipboard-translator/onboarding/";
+
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
@@ -22,6 +32,9 @@ await esbuild.build({
   target: ["chrome114"],
   sourcemap: true,
   logLevel: "info",
+  define: {
+    __ONBOARDING_URL__: JSON.stringify(ONBOARDING_URL),
+  },
 });
 
 const manifest = {
@@ -30,6 +43,8 @@ const manifest = {
   version: pkg.version,
   description:
     "Click YouTube subtitle words to look them up via the local Clipboard Translator desktop app.",
+  // Pins extension ID for unpacked / pre-store builds (must match distribution.py).
+  key: EXTENSION_PUBLIC_KEY_B64,
   action: {
     default_title: "Clipboard Translator",
     default_popup: "popup.html",
@@ -37,8 +52,11 @@ const manifest = {
   background: {
     service_worker: "background.js",
   },
-  permissions: ["storage"],
+  permissions: ["storage", "nativeMessaging"],
   host_permissions: ["http://127.0.0.1/*", "https://www.youtube.com/*"],
+  externally_connectable: {
+    matches: ["https://zhuji423.github.io/*"],
+  },
   content_scripts: [
     {
       matches: ["https://www.youtube.com/*", "https://youtube.com/*"],

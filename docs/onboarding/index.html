@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>安装 Clipboard Translator 浏览器扩展（Edge）</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121316;
+        --card: #1e1f22;
+        --text: #e8eaed;
+        --muted: #9aa0a6;
+        --ok: #81c995;
+        --bad: #f28b82;
+        --warn: #fdd663;
+        --btn: #3c78d8;
+        --btn2: #3c4048;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: radial-gradient(1200px 600px at 10% -10%, #1a2a4a, transparent),
+          var(--bg);
+        color: var(--text);
+      }
+      main {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 40px 20px 64px;
+      }
+      h1 { font-size: 1.6rem; margin: 0 0 8px; }
+      .lead { color: var(--muted); margin: 0 0 24px; }
+      .card {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin-bottom: 16px;
+      }
+      .status-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .dot {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: var(--muted);
+        flex: 0 0 auto;
+      }
+      .dot.ok { background: var(--ok); }
+      .dot.bad { background: var(--bad); }
+      .dot.warn { background: var(--warn); }
+      ol { margin: 0; padding-left: 1.2em; }
+      li { margin: 8px 0; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+      a.btn, button.btn {
+        display: inline-block;
+        text-decoration: none;
+        color: #fff;
+        background: var(--btn);
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        cursor: pointer;
+        font: inherit;
+      }
+      a.btn.secondary, button.btn.secondary { background: var(--btn2); }
+      .hint { color: var(--muted); font-size: 0.9rem; margin-top: 12px; }
+      #detail { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>安装 Edge 浏览器扩展</h1>
+      <p class="lead">
+        请使用 <strong>Microsoft Edge</strong>。保持 Clipboard Translator 运行，
+        再从 Edge 加载项商店添加扩展（需点一次「获取」确认）。安装后可自动与桌面配对。
+        本产品不上架 Chrome 网上应用店。
+      </p>
+
+      <div class="card">
+        <div class="status-line">
+          <span id="dot" class="dot"></span>
+          <strong id="statusText">正在检测桌面端…</strong>
+        </div>
+        <div id="detail"></div>
+      </div>
+
+      <div class="card">
+        <strong>步骤</strong>
+        <ol>
+          <li>启动并保持 <strong>Clipboard Translator</strong> 运行（设置中启用「本机桥接」）。</li>
+          <li>用 <strong>Edge</strong> 打开下方按钮，在商店页确认获取扩展。</li>
+          <li>若尚未上架，可从 GitHub Release 下载扩展 zip，在 <code>edge://extensions</code> 用开发人员模式临时加载。</li>
+          <li>扩展安装后会尝试自动配对；失败时可在扩展弹窗输入桌面端 6 位配对码。</li>
+        </ol>
+        <div class="actions">
+          <a id="edgeBtn" class="btn" href="#" target="_blank" rel="noopener">安装 Edge 扩展</a>
+          <a
+            class="btn secondary"
+            href="https://github.com/zhuji423/clipboard-translator/releases"
+            target="_blank"
+            rel="noopener"
+            >GitHub Release</a
+          >
+        </div>
+        <p class="hint">
+          Edge Add-ons 上架前，上方按钮会指向本说明页。普通用户请用 Edge；
+          开发人员模式加载仅作过渡。
+        </p>
+      </div>
+    </main>
+    <script>
+      // Keep in sync with distribution.py (replaced after Edge listing).
+      const ONBOARDING_URL = "https://zhuji423.github.io/clipboard-translator/onboarding/";
+      const EDGE_ADDON_URL = ONBOARDING_URL;
+      const DEFAULT_PORT = 17890;
+
+      document.getElementById("edgeBtn").href = EDGE_ADDON_URL;
+
+      const dot = document.getElementById("dot");
+      const statusText = document.getElementById("statusText");
+      const detail = document.getElementById("detail");
+
+      async function probeDesktop(port = DEFAULT_PORT) {
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/health`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (!r.ok) return null;
+          return await r.json();
+        } catch {
+          return null;
+        }
+      }
+
+      async function refresh() {
+        const data = await probeDesktop();
+        if (!data) {
+          dot.className = "dot bad";
+          statusText.textContent = "未检测到桌面端";
+          detail.textContent =
+            "请先运行 Clipboard Translator，并在设置中启用「本机桥接」（默认端口 17890）。";
+          return;
+        }
+        if (data.paired) {
+          dot.className = "dot ok";
+          statusText.textContent = "桌面端在线 · 已配对";
+          detail.textContent = `端口 ${data.port ?? DEFAULT_PORT}。扩展安装后即可使用 YouTube 字幕点词 / 划词。`;
+        } else {
+          dot.className = "dot warn";
+          statusText.textContent = "桌面端在线 · 尚未配对";
+          detail.textContent =
+            "请用 Edge 安装扩展；若未自动连接，在桌面端点「开始配对」并在扩展弹窗输入 6 位码。";
+        }
+      }
+
+      void refresh();
+      setInterval(() => void refresh(), 3000);
+    </script>
+  </body>
+</html>

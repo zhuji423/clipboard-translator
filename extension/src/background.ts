@@ -1,8 +1,10 @@
 import {
+  AutoPairResponse,
   BridgeSettings,
   ExtensionMessage,
   HealthResponse,
   LookupResponse,
+  NATIVE_HOST_NAME,
   PairResponse,
   STORAGE_KEYS,
   TranslateResponse,
@@ -10,9 +12,40 @@ import {
   loadSettings,
 } from "./shared";
 
+declare const __ONBOARDING_URL__: string;
+
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   void handleMessage(message).then(sendResponse);
   return true;
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "install") {
+    void openOnboardingIfStoreInstall();
+  }
+  void tryAutoPair();
+});
+
+/** Sideload / unpacked 不打开远程引导页（GitHub Pages 未部署时会 404）。 */
+async function openOnboardingIfStoreInstall(): Promise<void> {
+  try {
+    const self = await chrome.management.getSelf();
+    if (self.installType === "development") {
+      return;
+    }
+  } catch {
+    // getSelf 不可用时仍尝试打开（商店包）
+  }
+  const base =
+    typeof __ONBOARDING_URL__ === "string" && __ONBOARDING_URL__
+      ? __ONBOARDING_URL__
+      : "https://zhuji423.github.io/clipboard-translator/onboarding/";
+  const url = `${base}${base.includes("#") ? "" : "#installed"}`;
+  void chrome.tabs.create({ url });
+}
+
+chrome.runtime.onStartup.addListener(() => {
+  void tryAutoPair();
 });
 
 async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessage> {
@@ -21,6 +54,9 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
   }
   if (message.type === "PAIR") {
     return pair(message.code, message.port);
+  }
+  if (message.type === "AUTO_PAIR") {
+    return tryAutoPair();
   }
   if (message.type === "LOOKUP") {
     return lookup(message.word, message.context, message.requestId);
@@ -31,8 +67,74 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
   return { type: "HEALTH_RESULT", ok: false, paired: false, online: false, error: "unknown message" };
 }
 
-async function health(): Promise<HealthResponse> {
+async function sendNativeCredentials(): Promise<{
+  ok: boolean;
+  port?: number;
+  token?: string;
+  error?: string;
+}> {
+  try {
+    const resp = (await chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+      type: "get_bridge_credentials",
+    })) as { ok?: boolean; port?: number; token?: string; error?: string };
+    if (!resp?.ok || !resp.token) {
+      return { ok: false, error: resp?.error || "Native Messaging 未返回令牌" };
+    }
+    return {
+      ok: true,
+      port: Number(resp.port) || undefined,
+      token: String(resp.token),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || "Native Messaging 不可用" };
+  }
+}
+
+async function tryAutoPair(): Promise<AutoPairResponse> {
   const settings = await loadSettings();
+  if (settings.token) {
+    return {
+      type: "AUTO_PAIR_RESULT",
+      ok: true,
+      port: settings.port,
+      pairSource: settings.pairSource || "native",
+    };
+  }
+  const nm = await sendNativeCredentials();
+  if (!nm.ok || !nm.token) {
+    return {
+      type: "AUTO_PAIR_RESULT",
+      ok: false,
+      error: nm.error || "自动配对失败，请使用短码配对",
+    };
+  }
+  const port = nm.port && nm.port > 0 ? nm.port : settings.port;
+  await chrome.storage.local.set({
+    [STORAGE_KEYS.token]: nm.token,
+    [STORAGE_KEYS.port]: port,
+    [STORAGE_KEYS.pairSource]: "native",
+  });
+  return { type: "AUTO_PAIR_RESULT", ok: true, port, pairSource: "native" };
+}
+
+async function health(): Promise<HealthResponse> {
+  let settings = await loadSettings();
+  let nmAvailable = settings.pairSource === "native";
+  if (!settings.token) {
+    const auto = await tryAutoPair();
+    if (auto.ok) {
+      settings = await loadSettings();
+      nmAvailable = true;
+    } else {
+      const err = auto.error || "";
+      nmAvailable = Boolean(err) && !/native messaging host not found|forbidden/i.test(err);
+    }
+  }
+  return probeHealth(settings, nmAvailable);
+}
+
+async function probeHealth(settings: BridgeSettings, nmAvailable: boolean): Promise<HealthResponse> {
   try {
     const resp = await fetch(`${bridgeBase(settings.port)}/health`, {
       method: "GET",
@@ -46,6 +148,8 @@ async function health(): Promise<HealthResponse> {
         online: false,
         error: `桌面端返回 HTTP ${resp.status}`,
         port: settings.port,
+        pairSource: settings.pairSource,
+        nmAvailable,
       };
     }
     const data = (await resp.json()) as { ok?: boolean; paired?: boolean; enabled?: boolean };
@@ -55,6 +159,8 @@ async function health(): Promise<HealthResponse> {
       paired: Boolean(settings.token) && Boolean(data.paired),
       online: true,
       port: settings.port,
+      pairSource: settings.pairSource,
+      nmAvailable,
     };
   } catch {
     return {
@@ -64,6 +170,8 @@ async function health(): Promise<HealthResponse> {
       online: false,
       error: "无法连接桌面端：请启动 Clipboard Translator 并启用浏览器集成",
       port: settings.port,
+      pairSource: settings.pairSource,
+      nmAvailable,
     };
   }
 }
@@ -89,6 +197,7 @@ async function pair(code: string, port?: number): Promise<PairResponse> {
     await chrome.storage.local.set({
       [STORAGE_KEYS.token]: data.token,
       [STORAGE_KEYS.port]: data.port || usePort,
+      [STORAGE_KEYS.pairSource]: "code",
     });
     return { type: "PAIR_RESULT", ok: true, port: data.port || usePort };
   } catch {
@@ -115,6 +224,18 @@ async function lookup(
     };
   }
   if (!settings.token) {
+    const auto = await tryAutoPair();
+    if (!auto.ok) {
+      return {
+        type: "LOOKUP_RESULT",
+        requestId,
+        ok: false,
+        error: "尚未配对桌面端",
+      };
+    }
+  }
+  const latest = await loadSettings();
+  if (!latest.token) {
     return {
       type: "LOOKUP_RESULT",
       requestId,
@@ -123,16 +244,16 @@ async function lookup(
     };
   }
   try {
-    const resp = await fetch(`${bridgeBase(settings.port)}/v1/lookup`, {
+    const resp = await fetch(`${bridgeBase(latest.port)}/v1/lookup`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.token}`,
+        Authorization: `Bearer ${latest.token}`,
       },
       body: JSON.stringify({
         word,
         context,
-        target_lang: settings.targetLang,
+        target_lang: latest.targetLang,
       }),
       signal: AbortSignal.timeout(45000),
     });
@@ -176,6 +297,18 @@ async function translate(text: string, requestId: string): Promise<TranslateResp
     };
   }
   if (!settings.token) {
+    const auto = await tryAutoPair();
+    if (!auto.ok) {
+      return {
+        type: "TRANSLATE_RESULT",
+        requestId,
+        ok: false,
+        error: "尚未配对桌面端",
+      };
+    }
+  }
+  const latest = await loadSettings();
+  if (!latest.token) {
     return {
       type: "TRANSLATE_RESULT",
       requestId,
@@ -184,11 +317,11 @@ async function translate(text: string, requestId: string): Promise<TranslateResp
     };
   }
   try {
-    const resp = await fetch(`${bridgeBase(settings.port)}/v1/translate`, {
+    const resp = await fetch(`${bridgeBase(latest.port)}/v1/translate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.token}`,
+        Authorization: `Bearer ${latest.token}`,
       },
       body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(10000),

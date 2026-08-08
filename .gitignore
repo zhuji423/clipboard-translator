@@ -12,3 +12,4 @@ build/
 release-notes.md
 extension/node_modules/
 extension/dist/
+extension/keys/

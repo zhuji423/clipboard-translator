@@ -40,16 +40,27 @@ if (Test-Path (Join-Path $Root "dist")) {
 python -m PyInstaller --noconfirm --clean clipboard_translator.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 
+Write-Host "Building Native Messaging host..."
+python -m PyInstaller --noconfirm --clean (Join-Path $Root "native_host\bridge_host.spec")
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller NM host failed" }
+
+$NmHostSrc = Join-Path $Root "dist\ClipboardTranslatorNmHost.exe"
+if (-not (Test-Path $NmHostSrc)) {
+    throw "NM host missing: $NmHostSrc"
+}
+
 $PortableSrc = Join-Path $Root "dist\ClipboardTranslator.exe"
 $PortableDir = Join-Path $Root "dist\portable"
 New-Item -ItemType Directory -Force -Path $PortableDir | Out-Null
 $PortableName = "ClipboardTranslator-$Version-portable.exe"
 Copy-Item -Force $PortableSrc (Join-Path $PortableDir $PortableName)
+Copy-Item -Force $NmHostSrc (Join-Path $PortableDir "ClipboardTranslatorNmHost.exe")
 
 $AppDir = Join-Path $Root "dist\app"
 if (-not (Test-Path (Join-Path $AppDir "ClipboardTranslator.exe"))) {
     throw "onedir output missing: dist\app\ClipboardTranslator.exe"
 }
+Copy-Item -Force $NmHostSrc (Join-Path $AppDir "ClipboardTranslatorNmHost.exe")
 
 Write-Host "Portable: $(Join-Path $PortableDir $PortableName)"
 Write-Host "App dir:  $AppDir"

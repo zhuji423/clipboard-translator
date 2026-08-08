@@ -32,6 +32,8 @@ from config import (
     save_font_size,
     save_llm_settings,
 )
+from distribution import ONBOARDING_URL, preferred_extension_install_url
+from native_messaging import register_native_messaging_host
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from paths import app_icon_path, ensure_user_config, is_frozen
@@ -984,14 +986,25 @@ def main() -> int:
         QMessageBox.critical(None, "配置错误", str(exc))
         return 1
 
+    if is_frozen():
+        try:
+            register_native_messaging_host()
+        except Exception:  # noqa: BLE001
+            pass
+
     if created and is_frozen():
         QMessageBox.information(
             None,
             "首次运行",
             f"已创建配置文件：\n{cfg_path}\n\n"
             "请在「设置」中填写 API URL、API Key 与模型名后再使用翻译。\n"
-            "也可直接编辑该配置文件。",
+            "也可直接编辑该配置文件。\n\n"
+            "接下来将打开浏览器扩展安装引导页（需在商店中确认添加扩展）。",
         )
+        try:
+            webbrowser.open(ONBOARDING_URL)
+        except Exception:  # noqa: BLE001
+            pass
 
     window = TranslatorWindow(
         always_on_top=cfg.app.always_on_top,
@@ -1025,6 +1038,10 @@ def main() -> int:
     menu.addAction(act_pause)
 
     menu.addSeparator()
+    act_ext = QAction("安装浏览器扩展", menu)
+    act_ext.triggered.connect(lambda: webbrowser.open(preferred_extension_install_url()))
+    menu.addAction(act_ext)
+
     act_update = QAction("检查更新", menu)
     act_update.triggered.connect(controller.check_for_updates)
     menu.addAction(act_update)
@@ -1051,6 +1068,13 @@ def main() -> int:
 
         tray.activated.connect(on_tray_activated)
         tray.show()
+        if is_frozen() and cfg.bridge.enabled and not (cfg.bridge.token or "").strip():
+            tray.showMessage(
+                "Clipboard Translator",
+                "浏览器扩展尚未配对：托盘菜单可打开安装引导；安装后一般会自动连接。",
+                QSystemTrayIcon.MessageIcon.Information,
+                8000,
+            )
     else:
         QMessageBox.information(
             window,

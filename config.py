@@ -33,7 +33,7 @@ class AppConfig:
 
 @dataclass(frozen=True)
 class BridgeSettings:
-    enabled: bool = False
+    enabled: bool = True
     port: int = DEFAULT_BRIDGE_PORT
     token: str = ""
 
@@ -90,7 +90,7 @@ def load_config(path: Path | None = None) -> Config:
             font_size=max(10, min(22, int(app_raw.get("font_size", 12)))),
         ),
         bridge=BridgeSettings(
-            enabled=bool(bridge_raw.get("enabled", False)),
+            enabled=bool(bridge_raw.get("enabled", True)),
             port=port,
             token=str(bridge_raw.get("token", "")),
         ),
