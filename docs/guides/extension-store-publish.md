@@ -1,40 +1,81 @@
-# Edge Add-ons 上架清单（正式分发）
+# Edge Add-ons 上架与运维清单
 
-本项目**只上架 Microsoft Edge Add-ons**（开发者注册免费，无需支付 Chrome Web Store 的 $5）。  
-不上架 Chrome Web Store；普通用户请使用 **Microsoft Edge** 安装扩展。
+本项目**只上架 Microsoft Edge Add-ons**（开发者注册免费）。不上架 Chrome Web Store。
 
-代码侧已固定扩展公钥与 ID（见根目录 `distribution.py` 的 `EXTENSION_EDGE_ID`）。上架是人工操作，完成后替换商店 URL 即可。
+## 运维项是否仍合适（相对早期 0.9.0 备忘）
 
-## 准备
+| 项 | 现状 | 是否仍要做 |
+|----|------|------------|
+| 启用 GitHub Pages（`/docs`） | 引导页 URL 已写进桌面端 / 扩展，但站点需你开启 | **要**（见下文） |
+| 备份 `extension/keys/extension.pem` | 已 gitignore；本机若有请备份 | **要**（开发期固定 ID 用） |
+| 提交 Edge Unlisted / Hidden | 尚未上架 | **要**（用本指南的 store zip） |
+| 上架后改商店 URL | 现为 `EDGE_ADDON_URL`（无 `CHROME_STORE_URL`） | **上架后要** |
+| 核对商店扩展 ID 与 NM `allowed_origins` | 商店 ID 可能与开发 ID 不同 | **上架后要** |
+| push `main` 打 `v0.9.0` Release | 已发布 **v0.9.2**（含 Setup / portable / NmHost / extension zip） | **已完成**，无需再为 0.9.0 操作 |
 
-1. 注册 [Edge Add-ons Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/overview)（需 Microsoft 账号，**通常免费**）
-2. 本地私钥：`extension/keys/extension.pem`（**勿提交 git**；丢失则开发期固定 ID 无法复现；请自行备份）
-3. 构建：`.\scripts\build_extension.ps1 -Zip`
-4. 上传前：从待上传的 `manifest.json` **删除 `key` 字段**（商店会自行签名；开发期 `key` 仅用于 unpacked 固定 ID）
+说明：浏览器仍要求用户点一次「获取」；exe 只能打开引导页并完成安装后的自动配对。
 
-## Edge Add-ons
+## 启用 GitHub Pages（展示 `docs/` + onboarding）
 
-1. 新建扩展 → 上传去掉 `key` 后的 zip
-2. 可见性选 **Hidden / Unlisted**（仅持有链接可安装，等价未公开）
-3. 隐私与权限说明：仅连接本机 `127.0.0.1`、不收集用户数据、需配套桌面应用；写清 `storage` / `nativeMessaging` / YouTube / localhost
-4. 提交审核；通过后复制商品 URL 与 **商店分配的扩展 ID**
-5. 若商店 ID ≠ `distribution.py` 的 `EXTENSION_EDGE_ID`：以商店 ID 为准，更新 `EXTENSION_EDGE_ID`、Inno `[Code]` 里的 `allowed_origins`，并重新发桌面版（否则 NM 自动配对会被拒绝）
+目标 URL：`https://zhuji423.github.io/clipboard-translator/onboarding/`
+
+### 网页操作（推荐）
+
+1. 打开仓库 **Settings → Pages**  
+   https://github.com/zhuji423/clipboard-translator/settings/pages
+2. **Build and deployment → Source** 选 **Deploy from a branch**
+3. Branch 选 **`main`**，文件夹选 **`/docs`**，保存
+4. 等 1–2 分钟；可用  
+   https://zhuji423.github.io/clipboard-translator/  
+   与  
+   https://zhuji423.github.io/clipboard-translator/onboarding/  
+   验证（`docs/README.md` 会变成站点首页，`docs/onboarding/` 为引导页）
+
+### 命令行（需有仓库 admin 权限）
+
+```powershell
+gh api repos/zhuji423/clipboard-translator/pages -X POST `
+  -f build_type=legacy `
+  -f source[branch]=main `
+  -f source[path]=/docs
+```
+
+若已存在 Pages 配置，改为更新：
+
+```powershell
+gh api repos/zhuji423/clipboard-translator/pages -X PUT `
+  -f build_type=legacy `
+  -f source[branch]=main `
+  -f source[path]=/docs
+```
+
+## 打 Edge 审核用压缩包
+
+```powershell
+.\scripts\build_extension.ps1 -StoreZip
+```
+
+产物：`dist\extension\ClipboardTranslator-extension-{version}-edge-store.zip`  
+（已去掉 manifest `key`，并去掉 `.map`，适合 Partner Center 上传）
+
+本地侧载仍用 `extension\dist` 或 `-Zip`（保留 `key` 以固定开发 ID）。
+
+## Partner Center 提交步骤
+
+1. 注册 [Edge Add-ons Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/overview)
+2. 新建扩展 → 上传上面的 **edge-store.zip**
+3. 可见性选 **Hidden / Unlisted**（仅链接可装）
+4. 隐私：仅连接本机 `127.0.0.1`、不收集用户数据、需配套桌面应用；权限写清 `storage` / `nativeMessaging` / YouTube / localhost
+5. 提交审核；通过后记下 **商品 URL** 与 **扩展 ID**
 
 ## 上架后改仓库
 
-同步替换下列位置的商店链接（上架前指向引导页）：
+1. `distribution.py` → `EDGE_ADDON_URL` = 商品链接  
+2. `docs/onboarding/index.html` 内同名常量  
+3. 若商店 ID ≠ `EXTENSION_EDGE_ID`：更新 `EXTENSION_EDGE_ID`、Inno `[Code]` 中 `allowed_origins`，升版并 push（否则 NM 自动配对会被拒绝）
 
-- [`distribution.py`](../../distribution.py) → `EDGE_ADDON_URL`
-- [`docs/onboarding/index.html`](../onboarding/index.html) 内 `EDGE_ADDON_URL`
-- 可选：README「给他人使用」中的链接说明
+## 备份私钥
 
-无需为「只改 URL」单独升版；若顺带改运行时代码则按 `AGENTS.md` 升版。
-
-## GitHub Pages
-
-仓库 Settings → Pages → Deploy from branch，目录选 `/docs`，使  
-`https://zhuji423.github.io/clipboard-translator/onboarding/` 可访问。
-
-## 为何不用 Chrome Web Store
-
-Chrome Web Store 开发者注册需一次性约 **$5 USD**。产品决定仅支持 Edge 商店分发；开发者仍可用 Edge / Chromium 的「加载已解压」做本地调试。
+```text
+extension/keys/extension.pem   ← 勿提交 git；请复制到密码管理器或安全盘
+```

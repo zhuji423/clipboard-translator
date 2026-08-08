@@ -140,6 +140,13 @@
 | 编写/使用的计划 | 延续 [`extension-distribution`](plans/history/extension-distribution.md) |
 | 完成工作 | 开发人员模式侧载时不打开未部署的远程 onboarding（避免 404） |
 
+### 0.9.3
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | 桥接稳定性小修 |
+| 完成工作 | 忽略客户端提前断开导致的 ConnectionResetError 控制台噪音 |
+
 ---
 
 ## 未完成 / 暂停（todo）
