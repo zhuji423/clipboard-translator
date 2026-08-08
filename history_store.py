@@ -7,8 +7,8 @@ from datetime import date, datetime
 from pathlib import Path
 from threading import Lock
 
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
+from paths import data_dir as default_data_dir
+
 _DAY_RE = re.compile(r"history-(\d{4}-\d{2}-\d{2})\.jsonl$")
 
 
@@ -27,7 +27,7 @@ class HistoryEntry:
 
 class HistoryStore:
     def __init__(self, data_dir: Path | None = None) -> None:
-        self._dir = data_dir or DATA_DIR
+        self._dir = data_dir or default_data_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
         self._lock = Lock()
 
@@ -83,6 +83,11 @@ class HistoryStore:
                     continue
         entries.reverse()
         return entries
+
+    def sum_day_cost(self, day: str | None = None) -> float:
+        """Sum estimated cost_yuan for a day (default: today, local machine)."""
+        target = day or date.today().isoformat()
+        return sum(entry.cost_yuan for entry in self.load_day(target))
 
 
 def now_ts() -> str:

@@ -1,0 +1,145 @@
+name: Release Windows
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version and short SHA
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python -c "from version import __version__; print(__version__)")
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Version=$VERSION SHA=$SHORT_SHA"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean clipboard_translator.spec
+
+      - name: Stage portable artifact
+        shell: pwsh
+        run: |
+          $Version = "${{ steps.meta.outputs.version }}"
+          $Sha = "${{ steps.meta.outputs.short_sha }}"
+          New-Item -ItemType Directory -Force -Path dist\portable | Out-Null
+          Copy-Item dist\ClipboardTranslator.exe "dist\portable\ClipboardTranslator-$Version-portable.exe"
+          Copy-Item dist\ClipboardTranslator.exe "dist\portable\ClipboardTranslator-$Version-$Sha-portable.exe"
+          if (-not (Test-Path "dist\app\ClipboardTranslator.exe")) {
+            throw "Missing dist\app\ClipboardTranslator.exe"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after choco install" }
+          echo "ISCC=$iscc" >> $env:GITHUB_ENV
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $Version = "${{ steps.meta.outputs.version }}"
+          $Sha = "${{ steps.meta.outputs.short_sha }}"
+          & "$env:ISCC" "/DMyAppVersion=$Version" installer\setup.iss
+          $setup = "dist\ClipboardTranslator-$Version-Setup.exe"
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          Copy-Item $setup "dist\ClipboardTranslator-$Version-$Sha-Setup.exe"
+
+      - name: Extract changelog for stable notes
+        id: notes
+        shell: bash
+        run: |
+          python scripts/extract_changelog.py "${{ steps.meta.outputs.version }}" > release-notes.md
+          cat release-notes.md
+
+      - name: Check whether stable tag already exists
+        id: tagcheck
+        shell: bash
+        run: |
+          TAG="v${{ steps.meta.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists — skip stable release"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG missing — will create stable release"
+          fi
+
+      - name: Publish rolling preview pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          SHA="${{ steps.meta.outputs.short_sha }}"
+          NOTES="Automated preview build from \`${GITHUB_SHA}\` (v${VERSION}).
+
+          Artifacts:
+          - \`ClipboardTranslator-${VERSION}-${SHA}-portable.exe\`
+          - \`ClipboardTranslator-${VERSION}-${SHA}-Setup.exe\`
+
+          Config/history: \`%APPDATA%\\ClipboardTranslator\`
+          "
+          # Recreate so old SHA-named assets do not accumulate.
+          gh release delete preview --yes || true
+          git push origin :refs/tags/preview || true
+          git tag -f preview "$GITHUB_SHA"
+          git push -f origin refs/tags/preview
+          gh release create preview \
+            --prerelease \
+            --title "Preview ${VERSION} (${SHA})" \
+            --notes "$NOTES" \
+            "dist/portable/ClipboardTranslator-${VERSION}-${SHA}-portable.exe" \
+            "dist/ClipboardTranslator-${VERSION}-${SHA}-Setup.exe"
+
+      - name: Create stable tag and release
+        if: steps.tagcheck.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/${TAG}"
+          gh release create "$TAG" \
+            --title "Clipboard Translator ${VERSION}" \
+            --notes-file release-notes.md \
+            "dist/portable/ClipboardTranslator-${VERSION}-portable.exe" \
+            "dist/ClipboardTranslator-${VERSION}-Setup.exe"

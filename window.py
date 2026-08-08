@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QFont, QMouseEvent
+from PySide6.QtGui import QFont, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -16,16 +17,41 @@ from PySide6.QtWidgets import (
 from icons import svg_icon, title_icon_pair
 
 
+class WrappingLabel(QLabel):
+    """Word-wrapping label that uses the full width given by the layout."""
+
+    def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def sizeHint(self) -> QSize:
+        width = max(self.width(), 1)
+        return QSize(width, self.heightForWidth(width))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.updateGeometry()
+
+
 class TitleBar(QWidget):
     pin_toggled = Signal(bool)
     history_clicked = Signal()
     settings_clicked = Signal()
     minimize_clicked = Signal()
     close_clicked = Signal()
+    user_moved = Signal()
 
     def __init__(self, parent: QWidget | None = None, pinned: bool = True) -> None:
         super().__init__(parent)
         self._drag_pos: QPoint | None = None
+        self._did_drag = False
         self.setFixedHeight(36)
         self.setObjectName("TitleBar")
 
@@ -96,6 +122,7 @@ class TitleBar(QWidget):
             self._drag_pos = (
                 event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
             )
+            self._did_drag = False
             event.accept()
         else:
             super().mousePressEvent(event)
@@ -106,12 +133,16 @@ class TitleBar(QWidget):
             and event.buttons() & Qt.MouseButton.LeftButton
         ):
             self.window().move(event.globalPosition().toPoint() - self._drag_pos)
+            self._did_drag = True
             event.accept()
         else:
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._did_drag:
+            self.user_moved.emit()
         self._drag_pos = None
+        self._did_drag = False
         super().mouseReleaseEvent(event)
 
 
@@ -124,6 +155,8 @@ class TranslatorWindow(QMainWindow):
         super().__init__()
         self._always_on_top = always_on_top
         self._font_size = font_size
+        self._user_placed = False
+        self._anchored_once = False
         self.setWindowTitle("Clipboard Translator")
         self.resize(440, 400)
         self.setMinimumSize(340, 280)
@@ -141,6 +174,7 @@ class TranslatorWindow(QMainWindow):
         self.title_bar.history_clicked.connect(self.history_requested.emit)
         self.title_bar.minimize_clicked.connect(self.showMinimized)
         self.title_bar.close_clicked.connect(self.hide)
+        self.title_bar.user_moved.connect(self._on_user_moved)
         layout.addWidget(self.title_bar)
 
         body = QWidget()
@@ -158,18 +192,22 @@ class TranslatorWindow(QMainWindow):
         self.result.setReadOnly(True)
         self.result.setPlaceholderText("流式译文…")
 
+        # 状态行独占整行宽度，避免与按钮并排时 QLabel 换行宽度算错、过早折行
+        self.status = WrappingLabel("就绪")
+        self.status.setObjectName("StatusLabel")
+
         bottom = QHBoxLayout()
-        self.status = QLabel("就绪")
-        self.status.setWordWrap(True)
-        self.status.setMinimumHeight(36)
+        self.billing = WrappingLabel("")
+        self.billing.setObjectName("BillingLabel")
         self.copy_btn = QPushButton("复制译文")
-        bottom.addWidget(self.status, stretch=1)
+        bottom.addWidget(self.billing, stretch=1)
         bottom.addWidget(self.copy_btn, alignment=Qt.AlignmentFlag.AlignBottom)
 
         body_layout.addWidget(self.src_label)
         body_layout.addWidget(self.source, stretch=1)
         body_layout.addWidget(self.dst_label)
         body_layout.addWidget(self.result, stretch=2)
+        body_layout.addWidget(self.status)
         body_layout.addLayout(bottom)
         layout.addWidget(body, stretch=1)
 
@@ -178,6 +216,7 @@ class TranslatorWindow(QMainWindow):
             QMainWindow, QWidget { background: #1e1f22; color: #e8eaed; }
             #TitleBar { background: #16171a; border-bottom: 1px solid #2f3136; }
             QLabel { color: #9aa0a6; }
+            #BillingLabel { color: #8ab4f8; }
             QTextEdit {
                 background: #2b2d31;
                 border: 1px solid #3c4043;
@@ -224,6 +263,7 @@ class TranslatorWindow(QMainWindow):
         self.src_label.setFont(label)
         self.dst_label.setFont(label)
         self.status.setFont(status)
+        self.billing.setFont(status)
         self.copy_btn.setFont(status)
 
     def _apply_window_flags(self) -> None:
@@ -236,17 +276,42 @@ class TranslatorWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
 
+    def _on_user_moved(self) -> None:
+        self._user_placed = True
+
+    def _anchor_bottom_right(self) -> None:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        margin = 16
+        x = geo.right() - self.width() - margin
+        y = geo.bottom() - self.height() - margin
+        self.move(max(geo.left(), x), max(geo.top(), y))
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        if not self._anchored_once and not self._user_placed:
+            self._anchor_bottom_right()
+            self._anchored_once = True
+
     def _on_pin_toggled(self, pinned: bool) -> None:
         self._always_on_top = pinned
         visible = self.isVisible()
+        geom = self.geometry()
         self._apply_window_flags()
         if visible:
             self.show()
+            self.setGeometry(geom)
         self.pin_changed.emit(pinned)
 
-    def show_and_raise(self) -> None:
+    def show_raised(self) -> None:
+        """Show and raise without stealing keyboard focus."""
         self.show()
         self.raise_()
+
+    def show_and_raise(self) -> None:
+        self.show_raised()
         self.activateWindow()
 
     def set_source(self, text: str) -> None:
@@ -266,6 +331,10 @@ class TranslatorWindow(QMainWindow):
         color = "#f28b82" if error else "#9aa0a6"
         self.status.setStyleSheet(f"color: {color};")
         self.status.setText(text)
+
+    def set_billing(self, text: str) -> None:
+        self.billing.setText(text)
+        self.billing.setVisible(bool(text))
 
     def alert(self, title: str, message: str) -> None:
         QMessageBox.warning(self, title, message)

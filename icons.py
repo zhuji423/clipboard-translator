@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from PySide6.QtCore import QByteArray, QRectF, QSize, Qt
+from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from paths import icons_dir
+
 # Lucide icons (ISC): https://github.com/lucide-icons/lucide
-ICONS_DIR = Path(__file__).resolve().parent / "assets" / "icons"
 
 
 def svg_icon(
@@ -15,7 +14,7 @@ def svg_icon(
     color: str = "#c4c7cc",
     size: int = 18,
 ) -> QIcon:
-    path = ICONS_DIR / f"{name}.svg"
+    path = icons_dir() / f"{name}.svg"
     raw = path.read_text(encoding="utf-8")
     colored = raw.replace('stroke="currentColor"', f'stroke="{color}"')
     renderer = QSvgRenderer(QByteArray(colored.encode("utf-8")))

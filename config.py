@@ -6,8 +6,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_PATH = ROOT / "config.toml"
+from paths import config_path, ensure_user_config, example_config_path
 
 
 @dataclass(frozen=True)
@@ -37,9 +36,12 @@ class Config:
 
 
 def load_config(path: Path | None = None) -> Config:
-    cfg_path = path or CONFIG_PATH
+    if path is None:
+        cfg_path, _created = ensure_user_config()
+    else:
+        cfg_path = path
     if not cfg_path.exists():
-        example = ROOT / "config.example.toml"
+        example = example_config_path()
         raise FileNotFoundError(
             f"缺少 {cfg_path.name}。请复制 {example.name} 为 config.toml 并填写端点。"
         )
@@ -76,7 +78,7 @@ def load_config(path: Path | None = None) -> Config:
 
 
 def save_font_size(size: int, path: Path | None = None) -> None:
-    cfg_path = path or CONFIG_PATH
+    cfg_path = path or config_path()
     size = max(10, min(22, int(size)))
     text = cfg_path.read_text(encoding="utf-8")
     if re.search(r"(?m)^font_size\s*=", text):

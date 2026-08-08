@@ -101,15 +101,33 @@ def format_status_lines(cost: CostBreakdown, *, local_cache: bool = False) -> st
         return "本地缓存 · 0分（未请求 API）"
     if not cost.has_usage:
         return "完成"
-    line1 = (
+    tokens = (
         f"完成 · hit {fmt_tokens(cost.hit)} / miss {fmt_tokens(cost.miss)} "
         f"/ out {fmt_tokens(cost.completion)}"
     )
+    # 用不间断空格粘住易被 Qt 从中间拆开的片段
+    nbsp = "\u00a0"
     if cost.hit > 0 and cost.saved_yuan > 0:
-        line2 = (
-            f"{fmt_money(cost.cost_yuan)}（若无缓存约 {fmt_money(cost.no_cache_yuan)} · "
-            f"省 {cost.saved_pct:.0f}%）"
+        money = (
+            f"{fmt_money(cost.cost_yuan)}（若无缓存约{nbsp}{fmt_money(cost.no_cache_yuan)}"
+            f"{nbsp}·{nbsp}省{nbsp}{cost.saved_pct:.0f}%）"
         )
     else:
-        line2 = f"{fmt_money(cost.cost_yuan)}（本次无缓存命中）"
-    return f"{line1}\n{line2}"
+        money = f"{fmt_money(cost.cost_yuan)}（本次无缓存命中）"
+    tokens = tokens.replace(" / ", f"{nbsp}/{nbsp}")
+    return f"{tokens}{nbsp}·{nbsp}{money}"
+
+
+def format_billing_line(
+    used_yuan: float,
+    remaining_yuan: float | None,
+    *,
+    error: str | None = None,
+) -> str:
+    used = max(0.0, float(used_yuan))
+    used_part = f"今日已用 {fmt_money(used)}"
+    if remaining_yuan is None:
+        hint = error or "余额暂不可用"
+        return f"{used_part} · {hint}"
+    remaining = max(0.0, float(remaining_yuan))
+    return f"{used_part} · 剩余 {fmt_money(remaining)}"
