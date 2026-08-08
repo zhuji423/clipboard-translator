@@ -10,6 +10,9 @@ def main() -> int:
     if len(sys.argv) != 2:
         print("Usage: extract_changelog.py <version>", file=sys.stderr)
         return 2
+    # GitHub Actions windows-latest defaults to cp1252; changelog is Chinese UTF-8.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     version = sys.argv[1]
     text = Path("CHANGELOG.md").read_text(encoding="utf-8")
     pattern = rf"(?ms)^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## |\Z)"

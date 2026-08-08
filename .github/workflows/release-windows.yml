@@ -80,6 +80,9 @@ jobs:
       - name: Extract changelog for stable notes
         id: notes
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
         run: |
           python scripts/extract_changelog.py "${{ steps.meta.outputs.version }}" > release-notes.md
           cat release-notes.md
