@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
+
+from platform_ui import ui_font
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -60,7 +62,7 @@ class TitleBar(QWidget):
         layout.setSpacing(4)
 
         self.title = QLabel("Clipboard Translator")
-        self.title.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+        self.title.setFont(ui_font(9, QFont.Weight.DemiBold))
         self.title.setStyleSheet("color: #e8eaed;")
         layout.addWidget(self.title)
         layout.addStretch(1)
@@ -255,9 +257,9 @@ class TranslatorWindow(QMainWindow):
 
     def apply_font_size(self, size: int) -> None:
         self._font_size = size
-        body = QFont("Segoe UI", size)
-        label = QFont("Segoe UI", max(9, size - 1), QFont.Weight.DemiBold)
-        status = QFont("Segoe UI", max(9, size - 1))
+        body = ui_font(size)
+        label = ui_font(max(9, size - 1), QFont.Weight.DemiBold)
+        status = ui_font(max(9, size - 1))
         self.source.setFont(body)
         self.result.setFont(body)
         self.src_label.setFont(label)

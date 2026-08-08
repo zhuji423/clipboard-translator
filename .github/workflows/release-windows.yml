@@ -113,8 +113,11 @@ jobs:
           Artifacts:
           - \`ClipboardTranslator-${VERSION}-${SHA}-portable.exe\`
           - \`ClipboardTranslator-${VERSION}-${SHA}-Setup.exe\`
+          - \`ClipboardTranslator-${VERSION}-${SHA}-macos.zip\` (uploaded by macOS workflow when ready)
 
-          Config/history: \`%APPDATA%\\ClipboardTranslator\`
+          Config/history:
+          - Windows: \`%APPDATA%\\ClipboardTranslator\`
+          - macOS: \`~/Library/Application Support/ClipboardTranslator\`
           "
           # Recreate so old SHA-named assets do not accumulate.
           gh release delete preview --yes || true

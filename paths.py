@@ -20,12 +20,21 @@ def resource_dir() -> Path:
 
 
 def user_data_dir() -> Path:
-    """Writable config / history. Packaged builds use %APPDATA%; source uses repo root."""
+    """Writable config / history. Packaged builds use OS app-data; source uses repo root."""
     if is_frozen():
-        base = os.environ.get("APPDATA")
-        if not base:
-            base = str(Path.home() / "AppData" / "Roaming")
-        path = Path(base) / APP_NAME
+        if sys.platform == "darwin":
+            path = Path.home() / "Library" / "Application Support" / APP_NAME
+        elif sys.platform == "win32":
+            base = os.environ.get("APPDATA")
+            if not base:
+                base = str(Path.home() / "AppData" / "Roaming")
+            path = Path(base) / APP_NAME
+        else:
+            base = os.environ.get("XDG_CONFIG_HOME")
+            if base:
+                path = Path(base) / APP_NAME
+            else:
+                path = Path.home() / ".config" / APP_NAME
     else:
         path = Path(__file__).resolve().parent
     path.mkdir(parents=True, exist_ok=True)
@@ -51,7 +60,19 @@ def icons_dir() -> Path:
 
 
 def app_icon_path() -> Path:
-    return resource_dir() / "assets" / "app.ico"
+    """Prefer platform-native icon assets when present."""
+    assets = resource_dir() / "assets"
+    if sys.platform == "darwin":
+        candidates = ("app.icns", "app.png", "app.ico")
+    elif sys.platform == "win32":
+        candidates = ("app.ico", "app.png", "app.icns")
+    else:
+        candidates = ("app.png", "app.ico", "app.icns")
+    for name in candidates:
+        path = assets / name
+        if path.is_file():
+            return path
+    return assets / candidates[0]
 
 
 def ensure_user_config() -> tuple[Path, bool]:

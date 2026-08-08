@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
+from platform_ui import ui_font
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -134,7 +134,7 @@ class SettingsDialog(QDialog):
         self.key_edit.setEchoMode(mode)
 
     def _preview_font(self, size: int) -> None:
-        self.preview.setFont(QFont("Segoe UI", size))
+        self.preview.setFont(ui_font(size))
 
     def _accept(self) -> None:
         base_url = self.url_edit.text().strip().rstrip("/")

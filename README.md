@@ -1,28 +1,43 @@
 # Clipboard Translator
 
-Windows 常驻剪切板翻译小工具：复制任意文本 → 自动调用你的 OpenAI 兼容 LLM 端点流式翻译 → PySide6 置顶小窗展示。
+常驻剪切板翻译小工具：复制任意文本 → 自动调用你的 OpenAI 兼容 LLM 端点流式翻译 → PySide6 置顶小窗展示。支持 **Windows** 与 **macOS**。
 
 当前版本见 [`version.py`](version.py)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。Agent 工作流见 [`AGENTS.md`](AGENTS.md)。
 
 ## 下载（推荐）
 
-- 正式版：[Releases](https://github.com/zhuji423/clipboard-translator/releases)（`ClipboardTranslator-*-Setup.exe` 或 `*-portable.exe`）
+- 正式版：[Releases](https://github.com/zhuji423/clipboard-translator/releases)
+  - Windows：`ClipboardTranslator-*-Setup.exe` 或 `*-portable.exe`
+  - macOS：`ClipboardTranslator-*-macos.zip`（内含 `Clipboard Translator.app`）
 - 预览版（跟随 `main` 最新构建）：[preview](https://github.com/zhuji423/clipboard-translator/releases/tag/preview)
 
-安装版写入开始菜单，可选开机自启；便携版下载即运行。二者均为托盘常驻。
+Windows 安装版写入开始菜单，可选开机自启；便携版下载即运行。macOS 将 `.app` 拖到「应用程序」即可。均为托盘 / 菜单栏常驻。
 
-配置与翻译历史目录：`%APPDATA%\ClipboardTranslator\`（首次运行会从示例生成 `config.toml`）。
+### 配置与历史目录
 
-未签名 EXE 可能被 SmartScreen 拦截，选「仍要运行」即可。
+| 平台 | 打包后路径 |
+|------|------------|
+| Windows | `%APPDATA%\ClipboardTranslator\` |
+| macOS | `~/Library/Application Support/ClipboardTranslator/` |
+
+首次运行会从示例生成 `config.toml`。从源码运行时，配置与历史仍在仓库根目录。
+
+### 未签名说明
+
+- Windows：SmartScreen 可能拦截，选「仍要运行」即可。
+- macOS：当前发布包**未**公证。首次打开若被拦截：Finder 中对 `.app` **右键 → 打开**，再确认打开。签名与公证见 [`PLAN-macos-release.md`](PLAN-macos-release.md)。
 
 ## 从源码安装
 
-```powershell
+```bash
 cd clipboard-translator
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+# Windows:
+#   .\.venv\Scripts\Activate.ps1
+# macOS / Linux:
+#   source .venv/bin/activate
 pip install -r requirements.txt
-copy config.example.toml config.toml
+cp config.example.toml config.toml   # Windows 可用 copy
 ```
 
 编辑 `config.toml`，填入你的端点：
@@ -38,13 +53,15 @@ model = "your-model"
 
 ## 运行
 
-```powershell
+```bash
 python main.py
 ```
 
-托盘图标右键：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 退出。
+托盘 / 菜单栏图标：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 退出。
 
 ## 本地打包
+
+Windows：
 
 ```powershell
 .\scripts\build_windows.ps1
@@ -52,9 +69,18 @@ python main.py
 
 产物在 `dist\`（需本机安装 [Inno Setup 6](https://jrsoftware.org/isinfo.php) 才会生成 Setup）。设计说明见 [`PLAN-windows-release.md`](PLAN-windows-release.md)。
 
+macOS：
+
+```bash
+chmod +x scripts/build_macos.sh
+./scripts/build_macos.sh
+```
+
+产物：`dist/Clipboard Translator.app` 与 `dist/macos/ClipboardTranslator-*-macos.zip`。说明见 [`PLAN-macos-release.md`](PLAN-macos-release.md)。
+
 ## 行为
 
-- 启动时窗口锚定到屏幕可用区域右下角（避开任务栏）；可拖动，之后不再强拉
+- 启动时窗口锚定到屏幕可用区域右下角（避开任务栏 / Dock）；可拖动，之后不再强拉
 - `QClipboard.dataChanged` 事件监听（非轮询）；复制后约 1s 确认再翻译，避免语音工具短暂改写剪贴板造成闪烁
 - LLM `stream=true`，首 token 上屏
 - `requests.Session` 长连接 + LRU 缓存 + 新复制抢占旧任务（含缓存命中）

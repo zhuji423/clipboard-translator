@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-08
+
+### Added
+
+- 支持在 macOS 上运行与打包（`.app` + zip）；安装版配置与历史写入 `~/Library/Application Support/ClipboardTranslator`
+- CI 增加 macOS 构建，预览版与正式版 Release 可附带 `*-macos.zip`
+
+### Changed
+
+- 打包态用户目录按平台选择（Windows `%APPDATA%`、macOS Application Support、其他 XDG）
+- UI 字体随系统选择；无系统托盘时给出提示并保持主窗口可用
+
 ## [0.4.0] - 2026-08-08
 
 ### Added

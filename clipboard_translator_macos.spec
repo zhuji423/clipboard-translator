@@ -1,8 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-# Build onedir (dist/app) + onefile (dist/ClipboardTranslator.exe)
-# via: pyinstaller --noconfirm --clean clipboard_translator.spec
+# macOS: PyInstaller → Clipboard Translator.app
+# via: pyinstaller --noconfirm --clean clipboard_translator_macos.spec
 
 from pathlib import Path
+
+# Spec runs with SPECPATH on sys.path in practice; import version from repo root.
+import sys
+
+sys.path.insert(0, SPECPATH)
+from version import __version__  # noqa: E402
 
 block_cipher = None
 root = Path(SPECPATH)
@@ -10,12 +16,21 @@ root = Path(SPECPATH)
 datas = [
     (str(root / "config.example.toml"), "."),
     (str(root / "assets" / "icons"), "assets/icons"),
-    (str(root / "assets" / "app.ico"), "assets"),
 ]
+
 png = root / "assets" / "app.png"
-if png.is_file():
-    datas.append((str(png), "assets"))
-icon_path = str(root / "assets" / "app.ico")
+ico = root / "assets" / "app.ico"
+icns = root / "assets" / "app.icns"
+for optional in (png, ico, icns):
+    if optional.is_file():
+        datas.append((str(optional), "assets"))
+
+if icns.is_file():
+    icon_path = str(icns)
+elif png.is_file():
+    icon_path = str(png)
+else:
+    icon_path = str(ico)
 
 a = Analysis(
     ["main.py"],
@@ -51,15 +66,13 @@ a = Analysis(
         "tkinter",
         "unittest",
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe_dir = EXE(
+exe = EXE(
     pyz,
     a.scripts,
     [],
@@ -71,7 +84,7 @@ exe_dir = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=False,
+    argv_emulation=True,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
@@ -79,35 +92,28 @@ exe_dir = EXE(
 )
 
 coll = COLLECT(
-    exe_dir,
+    exe,
     a.binaries,
     a.zipfiles,
     a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="app",
+    name="ClipboardTranslator",
 )
 
-exe_one = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name="ClipboardTranslator",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+app = BUNDLE(
+    coll,
+    name="Clipboard Translator.app",
     icon=icon_path,
+    bundle_identifier="com.zhuji423.clipboardtranslator",
+    info_plist={
+        "CFBundleName": "Clipboard Translator",
+        "CFBundleDisplayName": "Clipboard Translator",
+        "CFBundleShortVersionString": __version__,
+        "CFBundleVersion": __version__,
+        "NSHighResolutionCapable": True,
+        "NSPrincipalClass": "NSApplication",
+        "LSMinimumSystemVersion": "11.0",
+    },
 )

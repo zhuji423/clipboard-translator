@@ -15,6 +15,7 @@ from config import Config, LlmConfig, load_config, save_font_size, save_llm_sett
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from paths import app_icon_path, ensure_user_config, is_frozen
+from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
 from settings_dialog import LlmSettingsValues, SettingsDialog
 from translator import OpenAICompatTranslator, UsageInfo
@@ -516,8 +517,7 @@ def _fallback_app_icon() -> QIcon:
     painter.setPen(QColor("#3c78d8"))
     painter.drawRoundedRect(4, 4, 56, 56, 12, 12)
     painter.setPen(QColor("white"))
-    font = QFont("Segoe UI", 22, QFont.Weight.Bold)
-    painter.setFont(font)
+    painter.setFont(ui_font(22, QFont.Weight.Bold))
     painter.drawText(pix.rect(), int(Qt.AlignmentFlag.AlignCenter), "译")
     painter.end()
     return QIcon(pix)
@@ -562,8 +562,6 @@ def main() -> int:
     window.setWindowIcon(app_icon)
     controller = AppController(cfg, window)
 
-    tray = QSystemTrayIcon(app_icon, app)
-    tray.setToolTip(f"Clipboard Translator v{__version__}")
     menu = QMenu()
 
     act_show = QAction("显示窗口", menu)
@@ -593,15 +591,29 @@ def main() -> int:
     act_quit.triggered.connect(app.quit)
     menu.addAction(act_quit)
 
-    tray.setContextMenu(menu)
-    tray.activated.connect(
-        lambda reason: (
-            window.show_and_raise()
-            if reason == QSystemTrayIcon.ActivationReason.Trigger
-            else None
+    tray: QSystemTrayIcon | None = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = QSystemTrayIcon(app_icon, app)
+        tray.setToolTip(f"Clipboard Translator v{__version__}")
+        tray.setContextMenu(menu)
+
+        def on_tray_activated(reason: QSystemTrayIcon.ActivationReason) -> None:
+            if reason in (
+                QSystemTrayIcon.ActivationReason.Trigger,
+                QSystemTrayIcon.ActivationReason.DoubleClick,
+            ):
+                # Context menu remains via setContextMenu (right-click /
+                # macOS menu-bar click patterns vary by OS).
+                window.show_and_raise()
+
+        tray.activated.connect(on_tray_activated)
+        tray.show()
+    else:
+        QMessageBox.information(
+            window,
+            "系统托盘不可用",
+            "当前环境没有系统托盘。主窗口将保持显示；请从窗口关闭应用进程。",
         )
-    )
-    tray.show()
 
     window.set_status("监听中")
     window.show()

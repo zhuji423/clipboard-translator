@@ -1,0 +1,121 @@
+name: Release macOS
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Read version and short SHA
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(python -c "from version import __version__; print(__version__)")
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Version=$VERSION SHA=$SHORT_SHA"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-build.txt Pillow
+
+      - name: Generate icons (including app.icns)
+        shell: bash
+        run: python scripts/generate_app_icon.py
+
+      - name: Build with PyInstaller
+        shell: bash
+        run: |
+          python -m PyInstaller --noconfirm --clean clipboard_translator_macos.spec
+
+      - name: Stage zip artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          SHA="${{ steps.meta.outputs.short_sha }}"
+          APP="dist/Clipboard Translator.app"
+          test -d "$APP"
+          mkdir -p dist/macos
+          ditto -c -k --sequesterRsrc --keepParent "$APP" \
+            "dist/macos/ClipboardTranslator-${VERSION}-macos.zip"
+          cp "dist/macos/ClipboardTranslator-${VERSION}-macos.zip" \
+            "dist/macos/ClipboardTranslator-${VERSION}-${SHA}-macos.zip"
+
+      - name: Upload macOS asset to rolling preview
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          SHA="${{ steps.meta.outputs.short_sha }}"
+          ASSET="dist/macos/ClipboardTranslator-${VERSION}-${SHA}-macos.zip"
+          # Wait until Windows workflow recreates preview (has a Setup.exe asset).
+          for i in $(seq 1 40); do
+            if gh release view preview >/dev/null 2>&1; then
+              if gh release view preview --json assets --jq '.assets[].name' \
+                | grep -E 'Setup\.exe$' >/dev/null; then
+                break
+              fi
+            fi
+            echo "Waiting for Windows preview release... ($i)"
+            sleep 15
+          done
+          if ! gh release view preview >/dev/null 2>&1; then
+            echo "preview release still missing; creating macOS-only preview"
+            gh release create preview \
+              --prerelease \
+              --title "Preview ${VERSION} (${SHA})" \
+              --notes "macOS preview asset from \`${GITHUB_SHA}\` (v${VERSION})."
+          fi
+          gh release upload preview "$ASSET" --clobber
+
+      - name: Attach macOS asset to stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.meta.outputs.version }}"
+          TAG="v${VERSION}"
+          ASSET="dist/macos/ClipboardTranslator-${VERSION}-macos.zip"
+          # Windows workflow creates the tag/release when version is new.
+          for i in $(seq 1 40); do
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" "$ASSET" --clobber
+              echo "Uploaded $ASSET to $TAG"
+              exit 0
+            fi
+            if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "$TAG"; then
+              echo "Tag exists but release not ready yet... ($i)"
+            else
+              echo "Waiting for stable tag/release $TAG... ($i)"
+            fi
+            sleep 15
+          done
+          echo "Stable release $TAG not found within timeout; skip attach (ok if version already released earlier without waiting)." >&2
+          exit 0

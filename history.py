@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont, QMouseEvent
+from PySide6.QtGui import QMouseEvent
+
+from platform_ui import ui_font
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -68,8 +70,8 @@ class HistoryCard(QFrame):
         self.apply_font_size(font_size)
 
     def apply_font_size(self, size: int) -> None:
-        body = QFont("Segoe UI", size)
-        meta = QFont("Segoe UI", max(9, size - 1))
+        body = ui_font(size)
+        meta = ui_font(max(9, size - 1))
         self.src_label.setFont(body)
         self.dst_label.setFont(body)
         self.ts_label.setFont(meta)
