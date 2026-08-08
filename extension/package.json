@@ -1,0 +1,15 @@
+{
+  "name": "clipboard-translator-extension",
+  "version": "0.8.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "clean": "node -e \"fs=require('fs');fs.rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.2"
+  }
+}

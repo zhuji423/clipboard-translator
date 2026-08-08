@@ -26,6 +26,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Read version and short SHA
         id: meta
         shell: bash
@@ -40,7 +45,11 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-build.txt
+          python -m pip install -r requirements.txt -r requirements-build.txt Pillow
+
+      - name: Generate app icons
+        shell: bash
+        run: python scripts/generate_app_icon.py
 
       - name: Build with PyInstaller
         shell: bash
@@ -58,6 +67,16 @@ jobs:
           if (-not (Test-Path "dist\app\ClipboardTranslator.exe")) {
             throw "Missing dist\app\ClipboardTranslator.exe"
           }
+
+      - name: Build browser extension zip
+        shell: pwsh
+        run: |
+          .\scripts\build_extension.ps1 -Zip
+          $Version = "${{ steps.meta.outputs.version }}"
+          $Sha = "${{ steps.meta.outputs.short_sha }}"
+          $src = "dist\extension\ClipboardTranslator-extension-$Version.zip"
+          if (-not (Test-Path $src)) { throw "Missing $src" }
+          Copy-Item $src "dist\extension\ClipboardTranslator-extension-$Version-$Sha.zip"
 
       - name: Install Inno Setup
         shell: pwsh
@@ -113,11 +132,14 @@ jobs:
           Artifacts:
           - \`ClipboardTranslator-${VERSION}-${SHA}-portable.exe\`
           - \`ClipboardTranslator-${VERSION}-${SHA}-Setup.exe\`
+          - \`ClipboardTranslator-extension-${VERSION}-${SHA}.zip\`
           - \`ClipboardTranslator-${VERSION}-${SHA}-macos.zip\` (uploaded by macOS workflow when ready)
 
           Config/history:
           - Windows: \`%APPDATA%\\ClipboardTranslator\`
           - macOS: \`~/Library/Application Support/ClipboardTranslator\`
+
+          Browser extension: unzip and load \`extension/dist\` contents via Chrome/Edge developer mode (see README).
           "
           # Recreate so old SHA-named assets do not accumulate.
           gh release delete preview --yes || true
@@ -129,7 +151,8 @@ jobs:
             --title "Preview ${VERSION} (${SHA})" \
             --notes "$NOTES" \
             "dist/portable/ClipboardTranslator-${VERSION}-${SHA}-portable.exe" \
-            "dist/ClipboardTranslator-${VERSION}-${SHA}-Setup.exe"
+            "dist/ClipboardTranslator-${VERSION}-${SHA}-Setup.exe" \
+            "dist/extension/ClipboardTranslator-extension-${VERSION}-${SHA}.zip"
 
       - name: Create stable tag and release
         if: steps.tagcheck.outputs.exists == 'false'
@@ -148,4 +171,5 @@ jobs:
             --title "Clipboard Translator ${VERSION}" \
             --notes-file release-notes.md \
             "dist/portable/ClipboardTranslator-${VERSION}-portable.exe" \
-            "dist/ClipboardTranslator-${VERSION}-Setup.exe"
+            "dist/ClipboardTranslator-${VERSION}-Setup.exe" \
+            "dist/extension/ClipboardTranslator-extension-${VERSION}.zip"

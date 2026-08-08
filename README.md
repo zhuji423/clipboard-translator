@@ -13,6 +13,8 @@
 
 Windows 安装版写入开始菜单，可选开机自启；便携版下载即运行。macOS 将 `.app` 拖到「应用程序」即可。均为托盘 / 菜单栏常驻。
 
+Windows 打包版可在托盘或设置中「检查更新」：仅跟踪正式版 Release，确认后下载覆盖并自动重启（设计见 [`PLAN-updater.md`](PLAN-updater.md)）。若覆盖安装后**任务栏**图标仍是旧图，多为系统图标缓存：重启资源管理器或取消固定后再固定快捷方式；托盘图标随新包内 `app.ico` 加载。
+
 ### 配置与历史目录
 
 | 平台 | 打包后路径 |
@@ -57,7 +59,7 @@ model = "your-model"
 python main.py
 ```
 
-托盘 / 菜单栏图标：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 退出。
+托盘 / 菜单栏图标：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 检查更新 / 退出。
 
 ## 本地打包
 
@@ -78,12 +80,32 @@ chmod +x scripts/build_macos.sh
 
 产物：`dist/Clipboard Translator.app` 与 `dist/macos/ClipboardTranslator-*-macos.zip`。说明见 [`PLAN-macos-release.md`](PLAN-macos-release.md)。
 
+## YouTube 字幕点词（浏览器扩展）
+
+桌面端负责 LLM 与密钥；Chrome/Edge 扩展只负责字幕交互与本机配对。设计见 [`PLAN-browser-bridge.md`](PLAN-browser-bridge.md)。
+
+1. 运行桌面端 → **设置** → 勾选「启用本机桥接」→ **开始配对**，记下 6 位配对码  
+2. 构建扩展：
+
+```powershell
+.\scripts\build_extension.ps1
+```
+
+3. 浏览器打开 `chrome://extensions`（或 Edge 对应页）→ 开启「开发者模式」→「加载已解压的扩展程序」→ 选择仓库内 `extension/dist`  
+4. 点击扩展图标 → 输入配对码 → **连接桌面端**  
+5. 打开 YouTube 视频并**开启字幕**，点击字幕中的单词即可暂停并查看语境释义；关闭弹层后，若本次由扩展暂停则会恢复播放  
+
+从 Release 下载的 `ClipboardTranslator-extension-*.zip` 解压后，在扩展管理页加载**该解压目录**即可（目录内应有 `manifest.json`）。
+
+说明：首版仅 YouTube；B 站适配后续再加。扩展不会保存 API Key，密钥始终留在桌面端。
+
 ## 行为
 
-- 启动时窗口锚定到屏幕可用区域右下角（避开任务栏 / Dock）；可拖动，之后不再强拉
+- 启动时窗口锚定到屏幕可用区域右下角（避开任务栏 / Dock）；可拖动标题栏移动，也可拖边缘 / 四角调整大小，之后不再强拉
 - `QClipboard.dataChanged` 事件监听（非轮询）；复制后约 1s 确认再翻译，避免语音工具短暂改写剪贴板造成闪烁
 - LLM `stream=true`，首 token 上屏
 - `requests.Session` 长连接 + LRU 缓存 + 新复制抢占旧任务（含缓存命中）
 - 网页 / 桌面软件 / Steam 等凡是走系统剪切板的来源均可
 - 语音误触已用确认窗抑制；仍冲突时可用托盘「暂停监听」
 - 状态栏下方展示今日已用（本机估算）与 DeepSeek 账户剩余余额；设计见 [`PLAN-billing-balance.md`](PLAN-billing-balance.md)
+- 可选浏览器桥接：YouTube 字幕点词查义写入历史时标记为 `youtube_word_lookup`

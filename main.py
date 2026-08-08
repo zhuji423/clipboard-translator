@@ -1,26 +1,57 @@
 from __future__ import annotations
 
+import json
 import sys
+import webbrowser
+from pathlib import Path
 from threading import Event
 
 from PySide6.QtCore import QDateTime, QObject, Qt, QThread, QTimer, Signal, Slot
 from dataclasses import replace
 
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QPainter, QPixmap
-from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
+from PySide6.QtWidgets import (
+    QApplication,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QSystemTrayIcon,
+)
 
 from balance import BalanceError, BalanceInfo, fetch_balance
+from browser_bridge import BridgeConfig, BrowserBridge
 from cache import LruCache
-from config import Config, LlmConfig, load_config, save_font_size, save_llm_settings
+from config import (
+    BridgeSettings,
+    Config,
+    LlmConfig,
+    load_config,
+    save_bridge_settings,
+    save_bridge_token,
+    save_font_size,
+    save_llm_settings,
+)
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
-from settings_dialog import LlmSettingsValues, SettingsDialog
+from settings_dialog import BridgeSettingsValues, LlmSettingsValues, SettingsDialog
 from translator import OpenAICompatTranslator, UsageInfo
+from updater import (
+    RELEASES_PAGE,
+    ReleaseInfo,
+    UpdateError,
+    detect_install_kind,
+    download_and_stage,
+    fetch_latest_release,
+    is_newer,
+    launch_apply_script,
+    prepare_windows_apply,
+)
 from version import __version__
 from window import TranslatorWindow
+from word_lookup import WordLookupService, cache_key, normalize_context, normalize_word
 
 CLIPBOARD_SETTLE_MS = 350
 CLIPBOARD_CONFIRM_MS = 800
@@ -94,7 +125,57 @@ class BalanceWorker(QObject):
             self.done.emit()
 
 
+class UpdateCheckWorker(QObject):
+    finished = Signal(object)  # ReleaseInfo
+    failed = Signal(str)
+    done = Signal()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(fetch_latest_release())
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+        finally:
+            self.done.emit()
+
+
+class UpdateDownloadWorker(QObject):
+    progress = Signal(int, object)  # done_bytes, total_or_None
+    finished = Signal(object)  # Path
+    failed = Signal(str)
+    done = Signal()
+
+    def __init__(self, release: ReleaseInfo) -> None:
+        super().__init__()
+        self._release = release
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            kind = detect_install_kind()
+            if kind is None:
+                raise UpdateError("当前运行方式不支持自动覆盖更新")
+            path = download_and_stage(
+                self._release,
+                kind,
+                on_progress=lambda done, total: self.progress.emit(done, total),
+            )
+            self.finished.emit(path)
+        except UpdateError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(str(exc))
+        finally:
+            self.done.emit()
+
+
 class AppController(QObject):
+    bridge_token_changed = Signal(str)
+    bridge_lookup_recorded = Signal()
+
     def __init__(self, cfg: Config, window: TranslatorWindow) -> None:
         super().__init__()
         self._cfg = cfg
@@ -123,6 +204,21 @@ class AppController(QObject):
         self._billing_fetching = False
         self._remaining_yuan: float | None = None
         self._balance_error: str | None = None
+        self._update_busy = False
+        self._update_thread: QThread | None = None
+        self._update_progress: QProgressDialog | None = None
+        self._pending_release: ReleaseInfo | None = None
+        self._lookup = WordLookupService(cfg.llm)
+        self._lookup_cache = LruCache(max(32, cfg.app.cache_size))
+        self._settings_dialog: SettingsDialog | None = None
+        self.bridge_token_changed.connect(self._apply_bridge_token_on_ui)
+        self.bridge_lookup_recorded.connect(self.refresh_billing)
+        self._bridge = BrowserBridge(
+            config_provider=self._bridge_config,
+            target_lang_provider=lambda: self._cfg.app.target_lang,
+            on_lookup=self._bridge_lookup,
+            on_token_saved=lambda token: self.bridge_token_changed.emit(token),
+        )
 
         self._settle_timer = QTimer(self)
         self._settle_timer.setSingleShot(True)
@@ -135,12 +231,106 @@ class AppController(QObject):
         self._confirm_timer.timeout.connect(self._on_clipboard_confirmed)
 
         self._translator.warm_up()
+        if cfg.bridge.enabled:
+            self._bridge.start()
 
         QGuiApplication.clipboard().dataChanged.connect(self.on_clipboard_changed)
         self._window.copy_btn.clicked.connect(self.copy_translation)
         self._window.history_requested.connect(self.open_history)
         self._window.settings_requested.connect(self.open_settings)
         self.refresh_billing()
+
+    def shutdown(self) -> None:
+        self._bridge.stop()
+
+    def _bridge_config(self) -> BridgeConfig:
+        b = self._cfg.bridge
+        return BridgeConfig(enabled=b.enabled, port=b.port, token=b.token)
+
+    @Slot(str)
+    def _apply_bridge_token_on_ui(self, token: str) -> None:
+        try:
+            save_bridge_token(token)
+        except Exception:
+            pass
+        self._cfg = replace(
+            self._cfg,
+            bridge=replace(self._cfg.bridge, token=token),
+        )
+        if self._settings_dialog is not None:
+            self._settings_dialog.set_bridge_paired(bool(token))
+
+    def _bridge_lookup(self, word: str, context: str, target_lang: str) -> dict:
+        word = normalize_word(word)
+        context = normalize_context(context)
+        key = cache_key(target_lang, word, context)
+        cached = self._lookup_cache.get(key)
+        if cached is not None:
+            try:
+                data = json.loads(cached)
+                if isinstance(data, dict):
+                    self._record_lookup_history(
+                        word,
+                        context,
+                        data,
+                        UsageInfo(),
+                        local_cache=True,
+                    )
+                    return data
+            except Exception:
+                pass
+
+        result = self._lookup.lookup(word, context, target_lang)
+        payload = result.to_dict()
+        self._lookup_cache.put(key, json.dumps(payload, ensure_ascii=False))
+        self._record_lookup_history(
+            word,
+            context,
+            payload,
+            result.usage,
+            local_cache=False,
+        )
+        return payload
+
+    def _record_lookup_history(
+        self,
+        word: str,
+        context: str,
+        payload: dict,
+        usage: UsageInfo,
+        *,
+        local_cache: bool,
+    ) -> None:
+        meaning = str(payload.get("meaning_in_context") or payload.get("gloss") or "")
+        source = word if not context else f"{word}  |  {context}"
+        if local_cache:
+            self._history.append(
+                HistoryEntry(
+                    ts=now_ts(),
+                    source=source,
+                    result=meaning,
+                    note="youtube_word_lookup|local_cache",
+                )
+            )
+            self.bridge_lookup_recorded.emit()
+            return
+        cost = estimate_cost(
+            self._cfg.llm.model, usage.hit, usage.miss, usage.completion
+        )
+        self._history.append(
+            HistoryEntry(
+                ts=now_ts(),
+                source=source,
+                result=meaning,
+                hit=cost.hit,
+                miss=cost.miss,
+                completion=cost.completion,
+                cost_yuan=cost.cost_yuan,
+                saved_yuan=cost.saved_yuan,
+                note="youtube_word_lookup",
+            )
+        )
+        self.bridge_lookup_recorded.emit()
 
     def set_listening(self, enabled: bool) -> None:
         self._listening = enabled
@@ -150,10 +340,190 @@ class AppController(QObject):
 
     @Slot()
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self._font_size, self._cfg.llm, self._window)
+        dialog = SettingsDialog(
+            self._font_size,
+            self._cfg.llm,
+            self._cfg.bridge,
+            self._window,
+        )
+        self._settings_dialog = dialog
         dialog.font_size_changed.connect(self.apply_font_size)
         dialog.llm_settings_changed.connect(self.apply_llm_settings)
+        dialog.bridge_settings_changed.connect(self.apply_bridge_settings)
+        dialog.check_updates_requested.connect(self.check_for_updates)
+        dialog.start_pairing_requested.connect(self.start_bridge_pairing)
+        dialog.revoke_pairing_requested.connect(self.revoke_bridge_pairing)
         dialog.exec()
+        self._settings_dialog = None
+
+    @Slot()
+    def check_for_updates(self) -> None:
+        if self._update_busy:
+            QMessageBox.information(self._window, "检查更新", "正在检查或下载更新，请稍候。")
+            return
+        self._update_busy = True
+        self._window.set_status("正在检查更新…")
+        thread = QThread()
+        worker = UpdateCheckWorker()
+        worker.moveToThread(thread)
+        queued = Qt.ConnectionType.QueuedConnection
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_update_check_finished, queued)
+        worker.failed.connect(self._on_update_check_failed, queued)
+        worker.done.connect(thread.quit, queued)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_update_check_thread_finished)
+        self._update_thread = thread
+        thread.start()
+
+    @Slot()
+    def _on_update_check_thread_finished(self) -> None:
+        self._update_thread = None
+
+    @Slot(object)
+    def _on_update_check_finished(self, release: object) -> None:
+        if not isinstance(release, ReleaseInfo):
+            self._update_busy = False
+            return
+        self._window.set_status("监听中" if self._listening else "已暂停")
+        if not is_newer(release.version):
+            QMessageBox.information(
+                self._window,
+                "检查更新",
+                f"当前已是最新正式版（v{__version__}）。",
+            )
+            self._update_busy = False
+            return
+
+        kind = detect_install_kind()
+        notes_preview = release.notes.strip()
+        if len(notes_preview) > 400:
+            notes_preview = notes_preview[:400] + "…"
+        detail = f"发现新版本 v{release.version}（当前 v{__version__}）。"
+        if notes_preview:
+            detail += f"\n\n{notes_preview}"
+
+        if kind is None:
+            detail += (
+                "\n\n当前环境不支持自动覆盖（需要 Windows 安装版或便携版）。"
+                "是否打开正式版下载页？"
+            )
+            answer = QMessageBox.question(
+                self._window,
+                "检查更新",
+                detail,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            self._update_busy = False
+            if answer == QMessageBox.StandardButton.Yes:
+                webbrowser.open(RELEASES_PAGE)
+            return
+
+        mode = "安装版（静默覆盖）" if kind.kind == "setup" else "便携版（替换 exe）"
+        detail += f"\n\n将下载并更新：{mode}\n更新后会自动重启。是否继续？"
+        answer = QMessageBox.question(
+            self._window,
+            "检查更新",
+            detail,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self._update_busy = False
+            return
+        self._start_update_download(release)
+
+    @Slot(str)
+    def _on_update_check_failed(self, error: str) -> None:
+        self._window.set_status("监听中" if self._listening else "已暂停")
+        self._update_busy = False
+        QMessageBox.warning(self._window, "检查更新", error)
+
+    def _start_update_download(self, release: ReleaseInfo) -> None:
+        self._pending_release = release
+        self._update_busy = True
+        progress = QProgressDialog(
+            f"正在下载 v{release.version}…",
+            None,
+            0,
+            0,
+            self._window,
+        )
+        progress.setWindowTitle("更新")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.setCancelButton(None)
+        self._update_progress = progress
+        progress.show()
+
+        thread = QThread()
+        worker = UpdateDownloadWorker(release)
+        worker.moveToThread(thread)
+        queued = Qt.ConnectionType.QueuedConnection
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_update_download_progress, queued)
+        worker.finished.connect(self._on_update_download_finished, queued)
+        worker.failed.connect(self._on_update_download_failed, queued)
+        worker.done.connect(thread.quit, queued)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_update_download_thread_finished)
+        self._update_thread = thread
+        thread.start()
+
+    @Slot()
+    def _on_update_download_thread_finished(self) -> None:
+        self._update_thread = None
+
+    @Slot(int, object)
+    def _on_update_download_progress(self, done: int, total: object) -> None:
+        dlg = self._update_progress
+        if dlg is None:
+            return
+        if isinstance(total, int) and total > 0:
+            dlg.setRange(0, total)
+            dlg.setValue(min(done, total))
+            dlg.setLabelText(
+                f"正在下载… {done // 1024} / {total // 1024} KB"
+            )
+        else:
+            dlg.setRange(0, 0)
+            dlg.setLabelText(f"正在下载… {done // 1024} KB")
+
+    @Slot(object)
+    def _on_update_download_finished(self, path: object) -> None:
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        self._pending_release = None
+        if not isinstance(path, Path):
+            self._update_busy = False
+            return
+        kind = detect_install_kind()
+        if kind is None:
+            self._update_busy = False
+            QMessageBox.warning(self._window, "更新", "无法识别安装形态，已取消应用更新。")
+            return
+        try:
+            script = prepare_windows_apply(kind, path)
+            launch_apply_script(script)
+        except Exception as exc:  # noqa: BLE001
+            self._update_busy = False
+            QMessageBox.critical(self._window, "更新", f"无法启动更新脚本：{exc}")
+            return
+        QApplication.quit()
+
+    @Slot(str)
+    def _on_update_download_failed(self, error: str) -> None:
+        if self._update_progress is not None:
+            self._update_progress.close()
+            self._update_progress = None
+        self._pending_release = None
+        self._update_busy = False
+        QMessageBox.warning(self._window, "更新", error)
 
     @Slot(int)
     def apply_font_size(self, size: int) -> None:
@@ -185,8 +555,63 @@ class AppController(QObject):
         self._translator = OpenAICompatTranslator(
             llm, target_lang=self._cfg.app.target_lang
         )
+        self._lookup.update_config(llm)
         self._translator.warm_up()
         self.refresh_billing()
+
+    @Slot(object)
+    def apply_bridge_settings(self, values: object) -> None:
+        if not isinstance(values, BridgeSettingsValues):
+            return
+        try:
+            save_bridge_settings(values.enabled, values.port)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self._window, "设置", f"保存浏览器集成失败：{exc}")
+            return
+        self._cfg = replace(
+            self._cfg,
+            bridge=BridgeSettings(
+                enabled=values.enabled,
+                port=values.port,
+                token=self._cfg.bridge.token,
+            ),
+        )
+        self._bridge.restart()
+
+    @Slot()
+    def start_bridge_pairing(self) -> None:
+        # Ensure bridge is enabled before pairing.
+        if not self._cfg.bridge.enabled:
+            try:
+                save_bridge_settings(True, self._cfg.bridge.port)
+            except Exception as exc:  # noqa: BLE001
+                QMessageBox.critical(self._window, "配对", f"无法启用桥接：{exc}")
+                return
+            self._cfg = replace(
+                self._cfg,
+                bridge=replace(self._cfg.bridge, enabled=True),
+            )
+            if self._settings_dialog is not None:
+                self._settings_dialog.bridge_enabled.setChecked(True)
+            self._bridge.restart()
+        try:
+            info = self._bridge.begin_pairing()
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(self._window, "配对", str(exc))
+            return
+        if self._settings_dialog is not None:
+            self._settings_dialog.set_pair_code(
+                str(info["code"]),
+                int(info["port"]),
+                int(info["expires_in"]),
+            )
+
+    @Slot()
+    def revoke_bridge_pairing(self) -> None:
+        self._bridge.revoke_token()
+        if self._settings_dialog is not None:
+            self._settings_dialog.set_bridge_paired(False)
+        QMessageBox.information(self._window, "配对", "已撤销浏览器配对令牌。")
 
     @Slot()
     def open_history(self) -> None:
@@ -587,6 +1012,11 @@ def main() -> int:
     menu.addAction(act_pause)
 
     menu.addSeparator()
+    act_update = QAction("检查更新", menu)
+    act_update.triggered.connect(controller.check_for_updates)
+    menu.addAction(act_update)
+
+    menu.addSeparator()
     act_quit = QAction("退出", menu)
     act_quit.triggered.connect(app.quit)
     menu.addAction(act_quit)
@@ -617,7 +1047,9 @@ def main() -> int:
 
     window.set_status("监听中")
     window.show()
-    return app.exec()
+    code = app.exec()
+    controller.shutdown()
+    return code
 
 
 if __name__ == "__main__":

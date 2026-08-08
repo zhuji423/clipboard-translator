@@ -23,8 +23,12 @@ function Get-AppVersion {
 $Version = Get-AppVersion
 Write-Host "Building ClipboardTranslator v$Version"
 
-python -m pip install -r requirements.txt -r requirements-build.txt
+python -m pip install -r requirements.txt -r requirements-build.txt Pillow
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
+
+Write-Host "Generating assets/app.ico from SVG..."
+python (Join-Path $Root "scripts\generate_app_icon.py")
+if ($LASTEXITCODE -ne 0) { throw "generate_app_icon.py failed" }
 
 if (Test-Path (Join-Path $Root "build")) {
     Remove-Item -Recurse -Force (Join-Path $Root "build")

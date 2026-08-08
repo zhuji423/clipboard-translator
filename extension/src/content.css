@@ -1,0 +1,4 @@
+/* Content CSS reserved for page-level tweaks; overlay styles live in Shadow DOM. */
+#ct-subtitle-host {
+  all: initial;
+}

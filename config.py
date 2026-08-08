@@ -8,6 +8,8 @@ from pathlib import Path
 
 from paths import config_path, ensure_user_config, example_config_path
 
+from browser_bridge import DEFAULT_BRIDGE_PORT
+
 
 @dataclass(frozen=True)
 class LlmConfig:
@@ -30,9 +32,17 @@ class AppConfig:
 
 
 @dataclass(frozen=True)
+class BridgeSettings:
+    enabled: bool = False
+    port: int = DEFAULT_BRIDGE_PORT
+    token: str = ""
+
+
+@dataclass(frozen=True)
 class Config:
     llm: LlmConfig
     app: AppConfig
+    bridge: BridgeSettings = BridgeSettings()
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -51,12 +61,17 @@ def load_config(path: Path | None = None) -> Config:
 
     llm_raw = raw.get("llm") or {}
     app_raw = raw.get("app") or {}
+    bridge_raw = raw.get("bridge") or {}
 
     base_url = str(llm_raw.get("base_url", "")).rstrip("/")
     api_key = str(llm_raw.get("api_key", ""))
     model = str(llm_raw.get("model", ""))
     if not base_url or not model:
         raise ValueError("config.toml 中 llm.base_url 与 llm.model 不能为空")
+
+    port = int(bridge_raw.get("port", DEFAULT_BRIDGE_PORT))
+    if port < 1024 or port > 65535:
+        port = DEFAULT_BRIDGE_PORT
 
     return Config(
         llm=LlmConfig(
@@ -73,6 +88,11 @@ def load_config(path: Path | None = None) -> Config:
             always_on_top=bool(app_raw.get("always_on_top", True)),
             cache_size=int(app_raw.get("cache_size", 128)),
             font_size=max(10, min(22, int(app_raw.get("font_size", 12)))),
+        ),
+        bridge=BridgeSettings(
+            enabled=bool(bridge_raw.get("enabled", False)),
+            port=port,
+            token=str(bridge_raw.get("token", "")),
         ),
     )
 
@@ -128,6 +148,53 @@ def save_llm_settings(
     text = _upsert_toml_string(text, "base_url", base_url, "llm")
     text = _upsert_toml_string(text, "api_key", api_key, "llm")
     text = _upsert_toml_string(text, "model", model, "llm")
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def _upsert_toml_bool(text: str, key: str, value: bool, section: str) -> str:
+    line = f"{key} = {'true' if value else 'false'}"
+    pattern = rf"(?m)^{re.escape(key)}\s*=\s*(?:true|false|True|False|1|0)"
+    if re.search(pattern, text):
+        return re.sub(pattern, line, text, count=1)
+    section_pat = rf"(?m)^(\[{re.escape(section)}\]\s*)$"
+    if re.search(section_pat, text):
+        return re.sub(section_pat, rf"\1\n{line}", text, count=1)
+    return text.rstrip() + f"\n\n[{section}]\n{line}\n"
+
+
+def _upsert_toml_int(text: str, key: str, value: int, section: str) -> str:
+    line = f"{key} = {int(value)}"
+    pattern = rf"(?m)^{re.escape(key)}\s*=\s*-?\d+"
+    if re.search(pattern, text):
+        return re.sub(pattern, line, text, count=1)
+    section_pat = rf"(?m)^(\[{re.escape(section)}\]\s*)$"
+    if re.search(section_pat, text):
+        return re.sub(section_pat, rf"\1\n{line}", text, count=1)
+    return text.rstrip() + f"\n\n[{section}]\n{line}\n"
+
+
+def save_bridge_settings(
+    enabled: bool,
+    port: int,
+    token: str | None = None,
+    path: Path | None = None,
+) -> None:
+    cfg_path = path or config_path()
+    port = int(port)
+    if port < 1024 or port > 65535:
+        raise ValueError("bridge.port 需在 1024–65535")
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_bool(text, "enabled", enabled, "bridge")
+    text = _upsert_toml_int(text, "port", port, "bridge")
+    if token is not None:
+        text = _upsert_toml_string(text, "token", token, "bridge")
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def save_bridge_token(token: str, path: Path | None = None) -> None:
+    cfg_path = path or config_path()
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_string(text, "token", token, "bridge")
     cfg_path.write_text(text, encoding="utf-8")
 
 

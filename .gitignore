@@ -10,3 +10,5 @@ dist/
 build/
 *.spec.bak
 release-notes.md
+extension/node_modules/
+extension/dist/

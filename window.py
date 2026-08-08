@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from enum import IntFlag
+
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QGuiApplication, QMouseEvent, QResizeEvent, QShowEvent
 
 from platform_ui import ui_font
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -17,6 +20,16 @@ from PySide6.QtWidgets import (
 )
 
 from icons import svg_icon, title_icon_pair
+
+_RESIZE_MARGIN = 6
+
+
+class _ResizeEdge(IntFlag):
+    NONE = 0
+    LEFT = 1
+    RIGHT = 2
+    TOP = 4
+    BOTTOM = 8
 
 
 class WrappingLabel(QLabel):
@@ -119,8 +132,17 @@ class TitleBar(QWidget):
         )
         self.pin_toggled.emit(checked)
 
+    def _window_edges_at(self, global_pos: QPoint) -> _ResizeEdge:
+        win = self.window()
+        if isinstance(win, TranslatorWindow):
+            return win._edges_at_global(global_pos)
+        return _ResizeEdge.NONE
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._window_edges_at(event.globalPosition().toPoint()):
+                event.ignore()
+                return
             self._drag_pos = (
                 event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
             )
@@ -159,9 +181,13 @@ class TranslatorWindow(QMainWindow):
         self._font_size = font_size
         self._user_placed = False
         self._anchored_once = False
+        self._resize_edges = _ResizeEdge.NONE
+        self._resize_origin_geo = QRect()
+        self._resize_origin_global = QPoint()
         self.setWindowTitle("Clipboard Translator")
         self.resize(440, 400)
         self.setMinimumSize(340, 280)
+        self.setMouseTracking(True)
         self._apply_window_flags()
 
         root = QWidget(self)
@@ -254,6 +280,142 @@ class TranslatorWindow(QMainWindow):
             """
         )
         self.apply_font_size(font_size)
+        self._install_resize_filters(self)
+
+    def _install_resize_filters(self, root: QWidget) -> None:
+        root.installEventFilter(self)
+        root.setMouseTracking(True)
+        for child in root.findChildren(QWidget):
+            child.installEventFilter(self)
+            child.setMouseTracking(True)
+
+    def _edges_at(self, pos: QPoint) -> _ResizeEdge:
+        m = _RESIZE_MARGIN
+        r = self.rect()
+        edges = _ResizeEdge.NONE
+        if pos.x() <= m:
+            edges |= _ResizeEdge.LEFT
+        elif pos.x() >= r.width() - m:
+            edges |= _ResizeEdge.RIGHT
+        if pos.y() <= m:
+            edges |= _ResizeEdge.TOP
+        elif pos.y() >= r.height() - m:
+            edges |= _ResizeEdge.BOTTOM
+        return edges
+
+    def _edges_at_global(self, global_pos: QPoint) -> _ResizeEdge:
+        return self._edges_at(self.mapFromGlobal(global_pos))
+
+    def _cursor_for_edges(self, edges: _ResizeEdge) -> Qt.CursorShape:
+        if edges in (_ResizeEdge.LEFT, _ResizeEdge.RIGHT):
+            return Qt.CursorShape.SizeHorCursor
+        if edges in (_ResizeEdge.TOP, _ResizeEdge.BOTTOM):
+            return Qt.CursorShape.SizeVerCursor
+        if edges in (
+            _ResizeEdge.LEFT | _ResizeEdge.TOP,
+            _ResizeEdge.RIGHT | _ResizeEdge.BOTTOM,
+        ):
+            return Qt.CursorShape.SizeFDiagCursor
+        if edges in (
+            _ResizeEdge.RIGHT | _ResizeEdge.TOP,
+            _ResizeEdge.LEFT | _ResizeEdge.BOTTOM,
+        ):
+            return Qt.CursorShape.SizeBDiagCursor
+        return Qt.CursorShape.ArrowCursor
+
+    def _update_hover_cursor(self, global_pos: QPoint, target: QObject) -> None:
+        if isinstance(target, QAbstractButton):
+            self.unsetCursor()
+            return
+        edges = self._edges_at_global(global_pos)
+        if edges:
+            self.setCursor(self._cursor_for_edges(edges))
+        else:
+            self.unsetCursor()
+
+    def _apply_resize(self, global_pos: QPoint) -> None:
+        delta = global_pos - self._resize_origin_global
+        geo = self._resize_origin_geo
+        x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+        min_w = self.minimumWidth()
+        min_h = self.minimumHeight()
+        edges = self._resize_edges
+
+        if edges & _ResizeEdge.LEFT:
+            x += delta.x()
+            w -= delta.x()
+            if w < min_w:
+                x -= min_w - w
+                w = min_w
+        elif edges & _ResizeEdge.RIGHT:
+            w = max(min_w, geo.width() + delta.x())
+
+        if edges & _ResizeEdge.TOP:
+            y += delta.y()
+            h -= delta.y()
+            if h < min_h:
+                y -= min_h - h
+                h = min_h
+        elif edges & _ResizeEdge.BOTTOM:
+            h = max(min_h, geo.height() + delta.y())
+
+        self.setGeometry(x, y, w, h)
+
+    def _end_resize(self) -> None:
+        if self._resize_edges:
+            self._user_placed = True
+            self._resize_edges = _ResizeEdge.NONE
+            self.releaseMouse()
+            self.unsetCursor()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        etype = event.type()
+        if etype in (
+            QEvent.Type.MouseMove,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+        ) and isinstance(event, QMouseEvent):
+            global_pos = event.globalPosition().toPoint()
+
+            if self._resize_edges:
+                if etype == QEvent.Type.MouseMove:
+                    self._apply_resize(global_pos)
+                    return True
+                if (
+                    etype == QEvent.Type.MouseButtonRelease
+                    and event.button() == Qt.MouseButton.LeftButton
+                ):
+                    self._end_resize()
+                    return True
+                return True
+
+            if etype == QEvent.Type.MouseMove:
+                if not (event.buttons() & Qt.MouseButton.LeftButton):
+                    self._update_hover_cursor(global_pos, obj)
+                return False
+
+            if (
+                etype == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.LeftButton
+                and not isinstance(obj, QAbstractButton)
+            ):
+                edges = self._edges_at_global(global_pos)
+                if edges:
+                    self._resize_edges = edges
+                    self._resize_origin_geo = self.geometry()
+                    self._resize_origin_global = global_pos
+                    self.setCursor(self._cursor_for_edges(edges))
+                    self.grabMouse()
+                    return True
+
+            if etype == QEvent.Type.MouseButtonRelease:
+                return False
+
+        elif etype == QEvent.Type.Leave and obj is self:
+            if not self._resize_edges:
+                self.unsetCursor()
+
+        return super().eventFilter(obj, event)
 
     def apply_font_size(self, size: int) -> None:
         self._font_size = size
