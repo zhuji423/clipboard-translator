@@ -1,0 +1,15 @@
+[llm]
+base_url = "https://api.deepseek.com"
+api_key = "sk-xxx"
+model = "deepseek-v4-flash"
+timeout_s = 30
+# 翻译建议保持 false：V4 默认会先思考数秒才出译文
+thinking = false
+
+[app]
+target_lang = "zh"
+min_chars = 2
+max_chars = 8000
+always_on_top = true
+cache_size = 128
+font_size = 12
