@@ -15,6 +15,29 @@ RATE_LIMIT_WINDOW_S = 10.0
 RATE_LIMIT_MAX = 30
 MAX_BODY_BYTES = 8_192
 
+# Client abort / navigation / AbortSignal.timeout often reset the socket mid-read.
+_CLIENT_DISCONNECT_ERRORS = (
+    ConnectionResetError,
+    ConnectionAbortedError,
+    BrokenPipeError,
+    TimeoutError,
+)
+
+
+class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """Avoid stderr tracebacks when the browser closes /health probes early."""
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        import sys
+
+        exc = sys.exc_info()[1]
+        if isinstance(exc, _CLIENT_DISCONNECT_ERRORS):
+            return
+        # WinError 10054 / 10053 sometimes wrap as OSError
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in (10054, 10053):
+            return
+        super().handle_error(request, client_address)
+
 
 @dataclass(frozen=True)
 class BridgeConfig:
@@ -71,7 +94,7 @@ class BrowserBridge:
             if self._server is not None:
                 return
             handler = self._make_handler()
-            server = ThreadingHTTPServer(("127.0.0.1", cfg.port), handler)
+            server = _QuietThreadingHTTPServer(("127.0.0.1", cfg.port), handler)
             server.daemon_threads = True
             thread = threading.Thread(
                 target=server.serve_forever,
@@ -173,6 +196,16 @@ class BrowserBridge:
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
                 return
 
+            def handle(self) -> None:
+                try:
+                    super().handle()
+                except _CLIENT_DISCONNECT_ERRORS:
+                    return
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) in (10054, 10053):
+                        return
+                    raise
+
             def _send(
                 self,
                 status: int,
@@ -183,21 +216,28 @@ class BrowserBridge:
                 body = b""
                 if payload is not None:
                     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header(
-                    "Access-Control-Allow-Headers",
-                    "Content-Type, Authorization, X-Bridge-Token",
-                )
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                if extra_headers:
-                    for key, value in extra_headers.items():
-                        self.send_header(key, value)
-                self.end_headers()
-                if body:
-                    self.wfile.write(body)
+                try:
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type, Authorization, X-Bridge-Token",
+                    )
+                    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                    if extra_headers:
+                        for key, value in extra_headers.items():
+                            self.send_header(key, value)
+                    self.end_headers()
+                    if body:
+                        self.wfile.write(body)
+                except _CLIENT_DISCONNECT_ERRORS:
+                    return
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) in (10054, 10053):
+                        return
+                    raise
 
             def do_OPTIONS(self) -> None:  # noqa: N802
                 self._send(204)
