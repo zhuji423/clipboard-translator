@@ -34,13 +34,15 @@ api_key = "sk-xxx"
 model = "your-model"
 ```
 
+也可在运行后打开「设置」填写 API URL、API Key 与模型名（保存后立即生效）。
+
 ## 运行
 
 ```powershell
 python main.py
 ```
 
-托盘图标右键：显示窗口 / 暂停监听 / 退出。
+托盘图标右键：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 退出。
 
 ## 本地打包
 

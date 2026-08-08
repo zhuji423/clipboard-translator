@@ -31,6 +31,7 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
+SetupIconFile=..\assets\app.ico
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes

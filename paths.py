@@ -50,6 +50,10 @@ def icons_dir() -> Path:
     return resource_dir() / "assets" / "icons"
 
 
+def app_icon_path() -> Path:
+    return resource_dir() / "assets" / "app.ico"
+
+
 def ensure_user_config() -> tuple[Path, bool]:
     """
     Ensure config.toml exists under the user data dir.

@@ -77,6 +77,27 @@ def load_config(path: Path | None = None) -> Config:
     )
 
 
+def _toml_escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+
+
+def _upsert_toml_string(text: str, key: str, value: str, section: str) -> str:
+    line = f'{key} = "{_toml_escape(value)}"'
+    pattern = rf'(?m)^{re.escape(key)}\s*=\s*(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[^\n#]+)'
+    if re.search(pattern, text):
+        return re.sub(pattern, line, text, count=1)
+    section_pat = rf"(?m)^(\[{re.escape(section)}\]\s*)$"
+    if re.search(section_pat, text):
+        return re.sub(section_pat, rf"\1\n{line}", text, count=1)
+    return text.rstrip() + f"\n\n[{section}]\n{line}\n"
+
+
 def save_font_size(size: int, path: Path | None = None) -> None:
     cfg_path = path or config_path()
     size = max(10, min(22, int(size)))
@@ -87,6 +108,26 @@ def save_font_size(size: int, path: Path | None = None) -> None:
         text = re.sub(r"(?m)^(\[app\]\s*)$", rf"\1\nfont_size = {size}", text, count=1)
     else:
         text = text.rstrip() + f"\n\n[app]\nfont_size = {size}\n"
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def save_llm_settings(
+    base_url: str,
+    api_key: str,
+    model: str,
+    path: Path | None = None,
+) -> None:
+    cfg_path = path or config_path()
+    base_url = base_url.strip().rstrip("/")
+    api_key = api_key.strip()
+    model = model.strip()
+    if not base_url or not model:
+        raise ValueError("llm.base_url 与 llm.model 不能为空")
+
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_string(text, "base_url", base_url, "llm")
+    text = _upsert_toml_string(text, "api_key", api_key, "llm")
+    text = _upsert_toml_string(text, "model", model, "llm")
     cfg_path.write_text(text, encoding="utf-8")
 
 

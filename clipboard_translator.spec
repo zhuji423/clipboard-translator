@@ -10,7 +10,9 @@ root = Path(SPECPATH)
 datas = [
     (str(root / "config.example.toml"), "."),
     (str(root / "assets" / "icons"), "assets/icons"),
+    (str(root / "assets" / "app.ico"), "assets"),
 ]
+icon_path = str(root / "assets" / "app.ico")
 
 a = Analysis(
     ["main.py"],
@@ -70,6 +72,7 @@ exe_dir = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_path,
 )
 
 coll = COLLECT(
@@ -103,4 +106,5 @@ exe_one = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_path,
 )

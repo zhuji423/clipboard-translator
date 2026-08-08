@@ -4,17 +4,19 @@ import sys
 from threading import Event
 
 from PySide6.QtCore import QDateTime, QObject, Qt, QThread, QTimer, Signal, Slot
+from dataclasses import replace
+
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from balance import BalanceError, BalanceInfo, fetch_balance
 from cache import LruCache
-from config import Config, LlmConfig, load_config, save_font_size
+from config import Config, LlmConfig, load_config, save_font_size, save_llm_settings
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
-from paths import ensure_user_config, is_frozen
+from paths import app_icon_path, ensure_user_config, is_frozen
 from pricing import estimate_cost, format_billing_line, format_status_lines
-from settings_dialog import SettingsDialog
+from settings_dialog import LlmSettingsValues, SettingsDialog
 from translator import OpenAICompatTranslator, UsageInfo
 from version import __version__
 from window import TranslatorWindow
@@ -147,8 +149,9 @@ class AppController(QObject):
 
     @Slot()
     def open_settings(self) -> None:
-        dialog = SettingsDialog(self._font_size, self._window)
+        dialog = SettingsDialog(self._font_size, self._cfg.llm, self._window)
         dialog.font_size_changed.connect(self.apply_font_size)
+        dialog.llm_settings_changed.connect(self.apply_llm_settings)
         dialog.exec()
 
     @Slot(int)
@@ -158,6 +161,31 @@ class AppController(QObject):
         if self._history_dialog is not None:
             self._history_dialog.apply_font_size(size)
         save_font_size(size)
+
+    @Slot(object)
+    def apply_llm_settings(self, values: object) -> None:
+        if not isinstance(values, LlmSettingsValues):
+            return
+        try:
+            save_llm_settings(values.base_url, values.api_key, values.model)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self._window, "设置", f"保存配置失败：{exc}")
+            return
+
+        self._cancel_current()
+        self._generation += 1
+        llm = replace(
+            self._cfg.llm,
+            base_url=values.base_url,
+            api_key=values.api_key,
+            model=values.model,
+        )
+        self._cfg = replace(self._cfg, llm=llm)
+        self._translator = OpenAICompatTranslator(
+            llm, target_lang=self._cfg.app.target_lang
+        )
+        self._translator.warm_up()
+        self.refresh_billing()
 
     @Slot()
     def open_history(self) -> None:
@@ -479,7 +507,7 @@ class AppController(QObject):
         self._render_billing()
 
 
-def _make_tray_icon() -> QIcon:
+def _fallback_app_icon() -> QIcon:
     pix = QPixmap(64, 64)
     pix.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pix)
@@ -495,10 +523,21 @@ def _make_tray_icon() -> QIcon:
     return QIcon(pix)
 
 
+def _load_app_icon() -> QIcon:
+    path = app_icon_path()
+    if path.is_file():
+        icon = QIcon(str(path))
+        if not icon.isNull():
+            return icon
+    return _fallback_app_icon()
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Clipboard Translator")
+    app_icon = _load_app_icon()
+    app.setWindowIcon(app_icon)
 
     try:
         cfg_path, created = ensure_user_config()
@@ -512,17 +551,18 @@ def main() -> int:
             None,
             "首次运行",
             f"已创建配置文件：\n{cfg_path}\n\n"
-            "请编辑其中的 llm.api_key（及端点）后再使用翻译。\n"
-            "也可稍后打开该文件继续修改。",
+            "请在「设置」中填写 API URL、API Key 与模型名后再使用翻译。\n"
+            "也可直接编辑该配置文件。",
         )
 
     window = TranslatorWindow(
         always_on_top=cfg.app.always_on_top,
         font_size=cfg.app.font_size,
     )
+    window.setWindowIcon(app_icon)
     controller = AppController(cfg, window)
 
-    tray = QSystemTrayIcon(_make_tray_icon(), app)
+    tray = QSystemTrayIcon(app_icon, app)
     tray.setToolTip(f"Clipboard Translator v{__version__}")
     menu = QMenu()
 
