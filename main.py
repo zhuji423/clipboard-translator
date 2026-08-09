@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QSystemTrayIcon,
+    QWidget,
 )
 
 from balance import BalanceError, BalanceInfo, fetch_balance
@@ -48,8 +49,11 @@ from updater import (
     detect_install_kind,
     download_and_stage,
     fetch_latest_release,
+    format_release_date,
+    format_version_with_date,
     is_newer,
     launch_apply_script,
+    local_changelog_date,
     prepare_windows_apply,
 )
 from version import __version__
@@ -209,7 +213,10 @@ class AppController(QObject):
         self._remaining_yuan: float | None = None
         self._balance_error: str | None = None
         self._update_busy = False
-        self._update_thread: QThread | None = None
+        self._update_check_thread: QThread | None = None
+        self._update_check_worker: UpdateCheckWorker | None = None
+        self._update_download_thread: QThread | None = None
+        self._update_download_worker: UpdateDownloadWorker | None = None
         self._update_progress: QProgressDialog | None = None
         self._pending_release: ReleaseInfo | None = None
         self._lookup = WordLookupService(cfg.llm)
@@ -371,12 +378,30 @@ class AppController(QObject):
         dialog.exec()
         self._settings_dialog = None
 
+    def _update_message_parent(self) -> QWidget:
+        if self._settings_dialog is not None:
+            return self._settings_dialog
+        return self._window
+
+    def _set_update_checking_ui(
+        self, checking: bool, *, status: str | None = None
+    ) -> None:
+        dlg = self._settings_dialog
+        if dlg is not None:
+            dlg.set_update_checking(checking, status=status)
+
+    def _finish_update_check_ui(self) -> None:
+        self._update_busy = False
+        self._set_update_checking_ui(False)
+        self._window.set_status("监听中" if self._listening else "已暂停")
+
     @Slot()
     def check_for_updates(self) -> None:
         if self._update_busy:
-            QMessageBox.information(self._window, "检查更新", "正在检查或下载更新，请稍候。")
+            # Already checking/downloading; avoid a misleading "please wait" popup.
             return
         self._update_busy = True
+        self._set_update_checking_ui(True)
         self._window.set_status("正在检查更新…")
         thread = QThread()
         worker = UpdateCheckWorker()
@@ -389,82 +414,93 @@ class AppController(QObject):
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_update_check_thread_finished)
-        self._update_thread = thread
+        self._update_check_thread = thread
+        self._update_check_worker = worker
         thread.start()
 
     @Slot()
     def _on_update_check_thread_finished(self) -> None:
-        self._update_thread = None
+        self._update_check_thread = None
+        self._update_check_worker = None
 
     @Slot(object)
     def _on_update_check_finished(self, release: object) -> None:
         if not isinstance(release, ReleaseInfo):
-            self._update_busy = False
+            self._finish_update_check_ui()
             return
-        self._window.set_status("监听中" if self._listening else "已暂停")
+        remote_date = format_release_date(release.published_at)
+        local_date = local_changelog_date(__version__)
+        parent = self._update_message_parent()
         if not is_newer(release.version):
-            QMessageBox.information(
-                self._window,
-                "检查更新",
-                f"当前已是最新正式版（v{__version__}）。",
+            shown = format_version_with_date(
+                __version__, remote_date or local_date
             )
-            self._update_busy = False
+            self._finish_update_check_ui()
+            QMessageBox.information(
+                parent,
+                "检查更新",
+                f"当前已是最新正式版（{shown}）。",
+            )
             return
 
         kind = detect_install_kind()
         notes_preview = release.notes.strip()
         if len(notes_preview) > 400:
             notes_preview = notes_preview[:400] + "…"
-        detail = f"发现新版本 v{release.version}（当前 v{__version__}）。"
+        remote_label = format_version_with_date(release.version, remote_date)
+        local_label = format_version_with_date(__version__, local_date)
+        detail = f"发现新版本 {remote_label}（当前 {local_label}）。"
         if notes_preview:
             detail += f"\n\n{notes_preview}"
 
         if kind is None:
             detail += (
                 "\n\n当前环境不支持自动覆盖（需要 Windows 安装版或便携版）。"
-                "是否打开正式版下载页？"
+                "是否打开该版本的 GitHub 发布页？"
             )
+            self._finish_update_check_ui()
             answer = QMessageBox.question(
-                self._window,
+                parent,
                 "检查更新",
                 detail,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.Yes,
             )
-            self._update_busy = False
             if answer == QMessageBox.StandardButton.Yes:
-                webbrowser.open(RELEASES_PAGE)
+                webbrowser.open(release.html_url or RELEASES_PAGE)
             return
 
         mode = "安装版（静默覆盖）" if kind.kind == "setup" else "便携版（替换 exe）"
         detail += f"\n\n将下载并更新：{mode}\n更新后会自动重启。是否继续？"
+        self._finish_update_check_ui()
         answer = QMessageBox.question(
-            self._window,
+            parent,
             "检查更新",
             detail,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes,
         )
         if answer != QMessageBox.StandardButton.Yes:
-            self._update_busy = False
             return
         self._start_update_download(release)
 
     @Slot(str)
     def _on_update_check_failed(self, error: str) -> None:
-        self._window.set_status("监听中" if self._listening else "已暂停")
-        self._update_busy = False
-        QMessageBox.warning(self._window, "检查更新", error)
+        parent = self._update_message_parent()
+        self._finish_update_check_ui()
+        QMessageBox.warning(parent, "检查更新", error)
 
     def _start_update_download(self, release: ReleaseInfo) -> None:
         self._pending_release = release
         self._update_busy = True
+        self._set_update_checking_ui(True, status="正在下载…")
+        parent = self._update_message_parent()
         progress = QProgressDialog(
             f"正在下载 v{release.version}…",
             None,
             0,
             0,
-            self._window,
+            parent,
         )
         progress.setWindowTitle("更新")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
@@ -486,12 +522,14 @@ class AppController(QObject):
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_update_download_thread_finished)
-        self._update_thread = thread
+        self._update_download_thread = thread
+        self._update_download_worker = worker
         thread.start()
 
     @Slot()
     def _on_update_download_thread_finished(self) -> None:
-        self._update_thread = None
+        self._update_download_thread = None
+        self._update_download_worker = None
 
     @Slot(int, object)
     def _on_update_download_progress(self, done: int, total: object) -> None:
@@ -514,20 +552,23 @@ class AppController(QObject):
             self._update_progress.close()
             self._update_progress = None
         self._pending_release = None
+        parent = self._update_message_parent()
         if not isinstance(path, Path):
-            self._update_busy = False
+            self._finish_update_check_ui()
             return
         kind = detect_install_kind()
         if kind is None:
-            self._update_busy = False
-            QMessageBox.warning(self._window, "更新", "无法识别安装形态，已取消应用更新。")
+            self._finish_update_check_ui()
+            QMessageBox.warning(
+                parent, "更新", "无法识别安装形态，已取消应用更新。"
+            )
             return
         try:
             script = prepare_windows_apply(kind, path)
             launch_apply_script(script)
         except Exception as exc:  # noqa: BLE001
-            self._update_busy = False
-            QMessageBox.critical(self._window, "更新", f"无法启动更新脚本：{exc}")
+            self._finish_update_check_ui()
+            QMessageBox.critical(parent, "更新", f"无法启动更新脚本：{exc}")
             return
         QApplication.quit()
 
@@ -537,8 +578,9 @@ class AppController(QObject):
             self._update_progress.close()
             self._update_progress = None
         self._pending_release = None
-        self._update_busy = False
-        QMessageBox.warning(self._window, "更新", error)
+        parent = self._update_message_parent()
+        self._finish_update_check_ui()
+        QMessageBox.warning(parent, "更新", error)
 
     @Slot(int)
     def apply_font_size(self, size: int) -> None:

@@ -9,6 +9,7 @@ root = Path(SPECPATH)
 
 datas = [
     (str(root / "config.example.toml"), "."),
+    (str(root / "CHANGELOG.md"), "."),
     (str(root / "assets" / "icons"), "assets/icons"),
     (str(root / "assets" / "app.ico"), "assets"),
 ]

@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 from browser_bridge import DEFAULT_BRIDGE_PORT
 from config import BridgeSettings, LlmConfig
 from distribution import preferred_extension_install_url
+from updater import format_version_with_date, local_changelog_date
+from version import __version__
 
 
 @dataclass(frozen=True)
@@ -142,15 +144,20 @@ class SettingsDialog(QDialog):
         self.preview = QLabel("预览：原文 / 译文 Abc 123")
         layout.addWidget(self.preview)
 
-        update_row = QHBoxLayout()
+        buttons = QHBoxLayout()
+        local_date = local_changelog_date(__version__)
+        self._version_label_base = format_version_with_date(
+            __version__, local_date
+        )
+        self.version_label = QLabel(self._version_label_base)
+        self.version_label.setToolTip(
+            "当前版本与本版 CHANGELOG 发布日期；检查更新对照 GitHub 正式版 Release"
+        )
         self.check_update_btn = QPushButton("检查更新")
         self.check_update_btn.setToolTip("从 GitHub 正式版 Release 检查并安装更新")
         self.check_update_btn.clicked.connect(self.check_updates_requested.emit)
-        update_row.addWidget(self.check_update_btn)
-        update_row.addStretch(1)
-        layout.addLayout(update_row)
-
-        buttons = QHBoxLayout()
+        buttons.addWidget(self.version_label)
+        buttons.addWidget(self.check_update_btn)
         buttons.addStretch(1)
         ok = QPushButton("确定")
         ok.clicked.connect(self._accept)
@@ -180,9 +187,23 @@ class SettingsDialog(QDialog):
                 padding: 6px 14px;
             }
             QPushButton:hover { background: #4b86e0; }
+            QPushButton:disabled {
+                background: #4a4d55;
+                color: #9aa0a6;
+            }
             """
         )
         self._preview_font(font_size)
+
+    def set_update_checking(
+        self, checking: bool, *, status: str | None = None
+    ) -> None:
+        self.check_update_btn.setEnabled(not checking)
+        if checking:
+            suffix = status or "正在检查…"
+            self.version_label.setText(f"{self._version_label_base}  ·  {suffix}")
+        else:
+            self.version_label.setText(self._version_label_base)
 
     def set_pair_code(self, code: str, port: int, expires_in: int) -> None:
         self.pair_code_label.setText(

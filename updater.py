@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
 import requests
 
-from paths import is_frozen
+from paths import is_frozen, resource_dir
 from version import __version__
 
 GITHUB_OWNER = "zhuji423"
@@ -23,6 +25,11 @@ RELEASES_LATEST_API = (
 )
 RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases"
 USER_AGENT = f"ClipboardTranslator/{__version__}"
+# Asia/Shanghai is UTC+8 year-round; fixed offset avoids Windows tzdata dependency.
+_SHANGHAI = timezone(timedelta(hours=8))
+_CHANGELOG_DATE_RE = re.compile(
+    r"^## \[(?P<ver>[^\]]+)\]\s*-\s*(?P<date>\d{4}-\d{2}-\d{2})\s*$"
+)
 
 
 class UpdateError(Exception):
@@ -38,6 +45,8 @@ class ReleaseInfo:
     portable_url: str | None
     setup_size: int | None
     portable_size: int | None
+    published_at: str | None = None
+    html_url: str = RELEASES_PAGE
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,67 @@ def parse_version(text: str) -> tuple[int, ...]:
 
 def is_newer(remote: str, local: str = __version__) -> bool:
     return parse_version(remote) > parse_version(local)
+
+
+def format_release_date(iso: str | None) -> str | None:
+    """Format GitHub published_at (ISO 8601) as Asia/Shanghai calendar date."""
+    if not iso:
+        return None
+    raw = iso.strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            dt = datetime.fromisoformat(raw[:-1]).replace(tzinfo=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_SHANGHAI).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _changelog_path() -> Path | None:
+    for candidate in (
+        resource_dir() / "CHANGELOG.md",
+        Path(__file__).resolve().parent / "CHANGELOG.md",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def local_changelog_date(version: str = __version__) -> str | None:
+    """Read Keep a Changelog date for *version* from bundled or repo CHANGELOG.md."""
+    path = _changelog_path()
+    if path is None:
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    target = version.strip()
+    if target.lower().startswith("v"):
+        target = target[1:]
+    for line in text.splitlines():
+        match = _CHANGELOG_DATE_RE.match(line.strip())
+        if not match:
+            continue
+        ver = match.group("ver").strip()
+        if ver.lower().startswith("v"):
+            ver = ver[1:]
+        if ver == target:
+            return match.group("date")
+    return None
+
+
+def format_version_with_date(
+    version: str = __version__, date: str | None = None
+) -> str:
+    if date:
+        return f"v{version} · {date}"
+    return f"v{version}"
 
 
 def _default_install_dir() -> Path:
@@ -116,6 +186,9 @@ def fetch_latest_release(timeout: float = 20.0) -> ReleaseInfo:
         raise UpdateError("正式版 Release 缺少 tag_name")
     version = tag[1:] if tag.lower().startswith("v") else tag
     notes = str(data.get("body") or "").strip()
+    published_at = data.get("published_at")
+    published_at_s = str(published_at).strip() if published_at else None
+    html_url = str(data.get("html_url") or "").strip() or RELEASES_PAGE
 
     setup_url = portable_url = None
     setup_size = portable_size = None
@@ -145,6 +218,8 @@ def fetch_latest_release(timeout: float = 20.0) -> ReleaseInfo:
         portable_url=portable_url,
         setup_size=setup_size,
         portable_size=portable_size,
+        published_at=published_at_s or None,
+        html_url=html_url,
     )
 
 
@@ -238,13 +313,6 @@ def prepare_windows_apply(
         lines = [
             "@echo off",
             "setlocal",
-            f"set PID={pid}",
-            ":wait",
-            'tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL',
-            "if not errorlevel 1 (",
-            "  timeout /t 1 /nobreak >NUL",
-            "  goto wait",
-            ")",
             f"start /wait \"\" {downloaded_q} /VERYSILENT /NORESTART /SUPPRESSMSGBOXES",
             f"if exist {relaunch_q} (",
             f"  start \"\" {relaunch_q}",
@@ -258,20 +326,21 @@ def prepare_windows_apply(
         lines = [
             "@echo off",
             "setlocal",
-            f"set PID={pid}",
-            ":wait",
-            'tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL',
-            "if not errorlevel 1 (",
-            "  timeout /t 1 /nobreak >NUL",
-            "  goto wait",
-            ")",
+            "set RETRIES=0",
+            ":copy",
             f"copy /y {downloaded_q} {target_q} >NUL",
-            f"if errorlevel 1 (",
-            f"  timeout /t 2 /nobreak >NUL",
-            f"  copy /y {downloaded_q} {target_q} >NUL",
-            ")",
+            "if not errorlevel 1 goto copied",
+            "set /a RETRIES+=1",
+            "if %RETRIES% GEQ 500 goto copy_failed",
+            "timeout /t 1 /nobreak >NUL 2>&1",
+            "goto copy",
+            ":copied",
             f"start \"\" {relaunch_q}",
             f"del /f /q {downloaded_q} >NUL 2>&1",
+            "goto cleanup",
+            ":copy_failed",
+            f"start \"\" {relaunch_q}",
+            ":cleanup",
             'del /f /q "%~f0" >NUL 2>&1',
         ]
     _write_cmd(script, lines)

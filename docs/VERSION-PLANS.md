@@ -147,6 +147,13 @@
 | 编写/使用的计划 | 桥接稳定性小修 |
 | 完成工作 | 忽略客户端提前断开导致的 ConnectionResetError 控制台噪音 |
 
+### 0.9.5
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`settings-version-date`](plans/history/settings-version-date.md)、[`update-check-feedback`](plans/history/update-check-feedback.md)（设计：[design/updater](plans/design/updater.md)） |
+| 完成工作 | 设置页展示版本号与发布日期；解析正式版日期/链接；检查状态可见；结果挂设置窗；修复 Worker 提前回收与更新脚本等待管道阻塞 |
+
 ---
 
 ## 未完成 / 暂停（todo）
