@@ -16,6 +16,13 @@ font_size = 12
 # Windows：选中文本后一步复制并问答；可在设置中修改
 question_hotkey = "Ctrl+Shift+Q"
 
+[manual_input]
+# Windows：呼出半透明手动输入框，Enter 提交翻译
+hotkey = "Ctrl+M"
+opacity = 0.82
+width = 420
+height = 144
+
 # 浏览器扩展本机桥接（仅 127.0.0.1；token 由配对 / Native Messaging 写入，勿手填密钥到扩展）
 [bridge]
 enabled = true

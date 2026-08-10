@@ -175,6 +175,13 @@
 | 编写/使用的计划 | [`clipboard-question-hotkey`](plans/history/clipboard-question-hotkey.md) |
 | 完成工作 | 保留 Ctrl+C 自动翻译；新增 Windows 可配置的一步问答快捷键；隔离连续问答会话；统一翻译/问答历史；按 generation 持有任务线程，并在 Qt 确认销毁后释放引用 |
 
+### 0.11.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`manual-input-translation`](plans/history/manual-input-translation.md) |
+| 完成工作 | 新增 Ctrl+M 半透明手动输入翻译框；支持置顶、拖动、透明度/尺寸调整与状态持久化；提交后复用现有翻译管线、缓存、历史和费用统计 |
+
 ---
 
 ## 未完成 / 暂停（todo）

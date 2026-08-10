@@ -40,10 +40,21 @@ class BridgeSettings:
 
 
 @dataclass(frozen=True)
+class ManualInputSettings:
+    hotkey: str = "Ctrl+M"
+    x: int | None = None
+    y: int | None = None
+    width: int = 420
+    height: int = 144
+    opacity: float = 0.82
+
+
+@dataclass(frozen=True)
 class Config:
     llm: LlmConfig
     app: AppConfig
     bridge: BridgeSettings = BridgeSettings()
+    manual_input: ManualInputSettings = ManualInputSettings()
 
 
 def load_config(path: Path | None = None) -> Config:
@@ -63,6 +74,7 @@ def load_config(path: Path | None = None) -> Config:
     llm_raw = raw.get("llm") or {}
     app_raw = raw.get("app") or {}
     bridge_raw = raw.get("bridge") or {}
+    manual_raw = raw.get("manual_input") or {}
 
     base_url = str(llm_raw.get("base_url", "")).rstrip("/")
     api_key = str(llm_raw.get("api_key", ""))
@@ -98,7 +110,24 @@ def load_config(path: Path | None = None) -> Config:
             port=port,
             token=str(bridge_raw.get("token", "")),
         ),
+        manual_input=ManualInputSettings(
+            hotkey=str(manual_raw.get("hotkey", "Ctrl+M")).strip() or "Ctrl+M",
+            x=_optional_int(manual_raw.get("x")),
+            y=_optional_int(manual_raw.get("y")),
+            width=max(300, int(manual_raw.get("width", 420))),
+            height=max(116, int(manual_raw.get("height", 144))),
+            opacity=max(0.35, min(1.0, float(manual_raw.get("opacity", 0.82)))),
+        ),
     )
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _toml_escape(value: str) -> str:
@@ -182,6 +211,41 @@ def _upsert_toml_int(text: str, key: str, value: int, section: str) -> str:
     if re.search(section_pat, text):
         return re.sub(section_pat, rf"\1\n{line}", text, count=1)
     return text.rstrip() + f"\n\n[{section}]\n{line}\n"
+
+
+def _upsert_toml_float(text: str, key: str, value: float, section: str) -> str:
+    line = f"{key} = {float(value):.2f}"
+    pattern = rf"(?m)^{re.escape(key)}\s*=\s*-?\d+(?:\.\d+)?"
+    if re.search(pattern, text):
+        return re.sub(pattern, line, text, count=1)
+    section_pat = rf"(?m)^(\[{re.escape(section)}\]\s*)$"
+    if re.search(section_pat, text):
+        return re.sub(section_pat, rf"\1\n{line}", text, count=1)
+    return text.rstrip() + f"\n\n[{section}]\n{line}\n"
+
+
+def save_manual_input_settings(
+    *,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    opacity: float,
+    path: Path | None = None,
+) -> None:
+    cfg_path = path or config_path()
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_int(text, "x", x, "manual_input")
+    text = _upsert_toml_int(text, "y", y, "manual_input")
+    text = _upsert_toml_int(text, "width", max(300, width), "manual_input")
+    text = _upsert_toml_int(text, "height", max(116, height), "manual_input")
+    text = _upsert_toml_float(
+        text,
+        "opacity",
+        max(0.35, min(1.0, opacity)),
+        "manual_input",
+    )
+    cfg_path.write_text(text, encoding="utf-8")
 
 
 def save_bridge_settings(

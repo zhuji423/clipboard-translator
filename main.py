@@ -32,6 +32,7 @@ from config import (
     save_bridge_token,
     save_font_size,
     save_llm_settings,
+    save_manual_input_settings,
     save_question_hotkey,
 )
 from distribution import ONBOARDING_URL, preferred_extension_install_url
@@ -40,6 +41,7 @@ from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from macos_clipboard import MacClipboardPoller
 from global_hotkey import GlobalHotkeyManager, WindowsSelectionInput
+from manual_input_window import ManualInputWindow
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
@@ -69,6 +71,7 @@ COPY_IGNORE_MS = 300
 QUESTION_CAPTURE_TIMEOUT_MS = 1200
 QUESTION_CAPTURE_POLL_MS = 20
 QUESTION_COPY_RELEASE_MS = 1000
+MANUAL_INPUT_HOTKEY_ID = 0x434D
 
 
 class TranslateWorker(QObject):
@@ -247,17 +250,42 @@ class AppController(QObject):
         self._lookup_cache = LruCache(max(32, cfg.app.cache_size))
         self._settings_dialog: SettingsDialog | None = None
         self._hotkey_manager = GlobalHotkeyManager(parent=self)
+        self._manual_input_hotkey_manager = GlobalHotkeyManager(
+            parent=self,
+            hotkey_id=MANUAL_INPUT_HOTKEY_ID,
+        )
         self._selection_input = (
             WindowsSelectionInput() if self._hotkey_manager.supported else None
         )
         self._question_hotkey_error = ""
+        self._manual_input_hotkey_error = ""
         self._hotkey_manager.activated.connect(self.capture_question_selection)
+        self._manual_input_hotkey_manager.activated.connect(self.show_manual_input)
         if self._hotkey_manager.supported:
             registered, error = self._hotkey_manager.rebind(
                 cfg.app.question_hotkey
             )
             if not registered:
                 self._question_hotkey_error = error
+        if self._manual_input_hotkey_manager.supported:
+            registered, error = self._manual_input_hotkey_manager.rebind(
+                cfg.manual_input.hotkey
+            )
+            if not registered:
+                self._manual_input_hotkey_error = error
+        self._manual_input_window = ManualInputWindow(
+            x=cfg.manual_input.x,
+            y=cfg.manual_input.y,
+            width=cfg.manual_input.width,
+            height=cfg.manual_input.height,
+            opacity=cfg.manual_input.opacity,
+        )
+        self._manual_input_window.submitted.connect(
+            self._on_manual_input_submitted
+        )
+        self._manual_input_window.state_changed.connect(
+            self._save_manual_input_state
+        )
         self.bridge_token_changed.connect(self._apply_bridge_token_on_ui)
         self.bridge_lookup_recorded.connect(self.refresh_billing)
         self.bridge_translate_requested.connect(self._on_bridge_translate_requested)
@@ -309,12 +337,52 @@ class AppController(QObject):
             self._mac_clip_poller.stop()
         self._question_capture_timer.stop()
         self._hotkey_manager.close()
+        self._manual_input_hotkey_manager.close()
+        self._manual_input_window.close()
         self._cancel_current()
         self._bridge.stop()
 
     @property
     def question_hotkey_error(self) -> str:
         return self._question_hotkey_error
+
+    @property
+    def manual_input_hotkey_error(self) -> str:
+        return self._manual_input_hotkey_error
+
+    @Slot()
+    def show_manual_input(self) -> None:
+        self._manual_input_window.show_prompt()
+
+    @Slot(str)
+    def _on_manual_input_submitted(self, text: str) -> None:
+        normalized = self._normalize_clipboard_text(text)
+        if normalized is None:
+            self._window.show_raised()
+            self._window.set_status("输入内容太短或为空", error=True)
+            return
+        self._abort_clipboard_pending()
+        self._apply_clipboard_text(normalized)
+
+    @Slot(int, int, int, int, float)
+    def _save_manual_input_state(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        opacity: float,
+    ) -> None:
+        try:
+            save_manual_input_settings(
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                opacity=opacity,
+            )
+        except Exception:
+            pass
 
     def _bridge_config(self) -> BridgeConfig:
         b = self._cfg.bridge
@@ -1289,6 +1357,10 @@ def main() -> int:
     act_show.triggered.connect(window.show_and_raise)
     menu.addAction(act_show)
 
+    act_manual_input = QAction("手动输入翻译", menu)
+    act_manual_input.triggered.connect(controller.show_manual_input)
+    menu.addAction(act_manual_input)
+
     act_settings = QAction("设置", menu)
     act_settings.triggered.connect(controller.open_settings)
     menu.addAction(act_settings)
@@ -1346,6 +1418,13 @@ def main() -> int:
             tray.showMessage(
                 "问答快捷键不可用",
                 controller.question_hotkey_error,
+                QSystemTrayIcon.MessageIcon.Warning,
+                8000,
+            )
+        if controller.manual_input_hotkey_error:
+            tray.showMessage(
+                "手动输入快捷键不可用",
+                controller.manual_input_hotkey_error,
                 QSystemTrayIcon.MessageIcon.Warning,
                 8000,
             )

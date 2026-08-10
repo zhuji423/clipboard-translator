@@ -11,7 +11,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 import global_hotkey
-from config import AppConfig, Config, LlmConfig, load_config, save_question_hotkey
+from config import (
+    AppConfig,
+    Config,
+    LlmConfig,
+    load_config,
+    save_manual_input_settings,
+    save_question_hotkey,
+)
 from global_hotkey import GlobalHotkeyManager, HotkeySpec, parse_hotkey
 from history_store import HistoryEntry, HistoryStore
 from main import AppController
@@ -100,6 +107,50 @@ def test_question_hotkey_config_roundtrip(tmp_path: Path) -> None:
     assert load_config(path).app.question_hotkey == "Ctrl+Shift+Q"
     save_question_hotkey("Ctrl+Alt+F8", path=path)
     assert load_config(path).app.question_hotkey == "Ctrl+Alt+F8"
+
+
+def test_manual_input_config_roundtrip(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[llm]\nbase_url = \"https://api.example.com\"\n"
+        "model = \"model\"\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(path)
+    assert cfg.manual_input.hotkey == "Ctrl+M"
+    assert cfg.manual_input.opacity == 0.82
+
+    save_manual_input_settings(
+        x=100,
+        y=120,
+        width=500,
+        height=180,
+        opacity=0.41,
+        path=path,
+    )
+    cfg = load_config(path)
+    assert cfg.manual_input.x == 100
+    assert cfg.manual_input.y == 120
+    assert cfg.manual_input.width == 500
+    assert cfg.manual_input.height == 180
+    assert cfg.manual_input.opacity == 0.41
+
+
+def test_multiple_hotkey_managers_keep_independent_shortcuts() -> None:
+    first = _FakeHotkeyBackend()
+    second = _FakeHotkeyBackend()
+    question = GlobalHotkeyManager(backend=first)
+    manual = GlobalHotkeyManager(backend=second)
+    try:
+        assert question.rebind("Ctrl+Shift+Q") == (True, "")
+        assert manual.rebind("Ctrl+M") == (True, "")
+        assert question.shortcut == "Ctrl+Shift+Q"
+        assert manual.shortcut == "Ctrl+M"
+        assert first.registered == ["Ctrl+Shift+Q"]
+        assert second.registered == ["Ctrl+M"]
+    finally:
+        question.close()
+        manual.close()
 
 
 def test_question_clipboard_event_is_consumed_without_translation() -> None:

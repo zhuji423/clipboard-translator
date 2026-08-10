@@ -105,12 +105,13 @@ class _WindowsNativeEventFilter(QAbstractNativeEventFilter):
 
 
 class WindowsHotkeyBackend:
-    HOTKEY_ID = 0x4351
+    DEFAULT_HOTKEY_ID = 0x4351
 
-    def __init__(self) -> None:
+    def __init__(self, hotkey_id: int = DEFAULT_HOTKEY_ID) -> None:
         if sys.platform != "win32":
             raise RuntimeError("全局问答快捷键当前仅支持 Windows")
         self._user32 = ctypes.WinDLL("user32", use_last_error=True)
+        self._hotkey_id = hotkey_id
         self._filter: _WindowsNativeEventFilter | None = None
         self._registered = False
 
@@ -120,7 +121,7 @@ class WindowsHotkeyBackend:
         ok = bool(
             self._user32.RegisterHotKey(
                 None,
-                self.HOTKEY_ID,
+                self._hotkey_id,
                 spec.modifiers | MOD_NOREPEAT,
                 spec.virtual_key,
             )
@@ -129,9 +130,9 @@ class WindowsHotkeyBackend:
             return False
         app = QCoreApplication.instance()
         if app is None:
-            self._user32.UnregisterHotKey(None, self.HOTKEY_ID)
+            self._user32.UnregisterHotKey(None, self._hotkey_id)
             return False
-        self._filter = _WindowsNativeEventFilter(self.HOTKEY_ID, callback)
+        self._filter = _WindowsNativeEventFilter(self._hotkey_id, callback)
         app.installNativeEventFilter(self._filter)
         self._registered = True
         return True
@@ -139,7 +140,7 @@ class WindowsHotkeyBackend:
     def unregister(self) -> None:
         if not self._registered:
             return
-        self._user32.UnregisterHotKey(None, self.HOTKEY_ID)
+        self._user32.UnregisterHotKey(None, self._hotkey_id)
         app = QCoreApplication.instance()
         if app is not None and self._filter is not None:
             app.removeNativeEventFilter(self._filter)
@@ -153,11 +154,20 @@ class WindowsHotkeyBackend:
 class GlobalHotkeyManager(QObject):
     activated = Signal()
 
-    def __init__(self, backend: HotkeyBackend | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        backend: HotkeyBackend | None = None,
+        parent=None,
+        hotkey_id: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self._backend = backend
         if self._backend is None and sys.platform == "win32":
-            self._backend = WindowsHotkeyBackend()
+            self._backend = WindowsHotkeyBackend(
+                WindowsHotkeyBackend.DEFAULT_HOTKEY_ID
+                if hotkey_id is None
+                else hotkey_id
+            )
         self._shortcut = ""
 
     @property
