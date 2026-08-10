@@ -154,6 +154,20 @@
 | 编写/使用的计划 | [`settings-version-date`](plans/history/settings-version-date.md)、[`update-check-feedback`](plans/history/update-check-feedback.md)（设计：[design/updater](plans/design/updater.md)） |
 | 完成工作 | 设置页展示版本号与发布日期；解析正式版日期/链接；检查状态可见；结果挂设置窗；修复 Worker 提前回收与更新脚本等待管道阻塞 |
 
+### 0.9.6
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-clipboard-poll`](plans/history/macos-clipboard-poll.md) |
+| 完成工作 | macOS 后台用 `NSPasteboard.changeCount` 轮询补齐剪贴板监听；主窗加入全屏 Space 叠层；Windows 路径不变 |
+
+### 0.9.7
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-fullscreen-overlay`](plans/history/macos-fullscreen-overlay.md) |
+| 完成工作 | 修正全屏叠层：`fullScreenAuxiliary` 仅对 NSPanel 生效；用不可见锚点 Panel + `addChildWindow` 让翻译窗出现在原生全屏 Space 上；保留 Dock |
+
 ---
 
 ## 未完成 / 暂停（todo）
