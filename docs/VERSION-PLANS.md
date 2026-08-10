@@ -161,6 +161,13 @@
 | 编写/使用的计划 | [`macos-clipboard-poll`](plans/history/macos-clipboard-poll.md) |
 | 完成工作 | macOS 后台用 `NSPasteboard.changeCount` 轮询补齐剪贴板监听；主窗加入全屏 Space 叠层；Windows 路径不变 |
 
+### 0.9.7
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-fullscreen-overlay`](plans/history/macos-fullscreen-overlay.md) |
+| 完成工作 | 修正全屏叠层：`fullScreenAuxiliary` 仅对 NSPanel 生效；用不可见锚点 Panel + `addChildWindow` 让翻译窗出现在原生全屏 Space 上；保留 Dock |
+
 ---
 
 ## 未完成 / 暂停（todo）
