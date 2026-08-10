@@ -168,6 +168,13 @@
 | 编写/使用的计划 | [`macos-fullscreen-overlay`](plans/history/macos-fullscreen-overlay.md) |
 | 完成工作 | 修正全屏叠层：`fullScreenAuxiliary` 仅对 NSPanel 生效；用不可见锚点 Panel + `addChildWindow` 让翻译窗出现在原生全屏 Space 上；保留 Dock |
 
+### 0.10.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`clipboard-question-hotkey`](plans/history/clipboard-question-hotkey.md) |
+| 完成工作 | 保留 Ctrl+C 自动翻译；新增 Windows 可配置的一步问答快捷键；隔离连续问答会话；统一翻译/问答历史；按 generation 持有任务线程，并在 Qt 确认销毁后释放引用 |
+
 ---
 
 ## 未完成 / 暂停（todo）

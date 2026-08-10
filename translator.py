@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
 from threading import Event, Lock
-from typing import Any
+from typing import Any, Literal
 
 import requests
 
@@ -18,9 +18,8 @@ LANG_LABELS = {
     "ko": "한국어",
 }
 
-# system + 2 轮 few-shot 占用的 message 条数（不可裁剪）
-_PREFIX_LEN = 5  # 1 system + 4 few-shot
 _MAX_MESSAGES_CHARS = 80_000
+SessionMode = Literal["translate", "answer"]
 
 
 def _build_system_prompt(target_lang: str) -> str:
@@ -37,6 +36,18 @@ def _build_system_prompt(target_lang: str) -> str:
         "标点与换行尽量跟随原文结构，不要擅自合并或删减段落。"
         "若原文已是目标语言，可做轻度润色使其更自然，但不要无故扩写或改变信息量。"
         "下面会给出若干示范问答，请严格模仿其「只给译文」的输出风格。"
+    )
+
+
+def _build_answer_system_prompt(target_lang: str) -> str:
+    lang = LANG_LABELS.get(target_lang, target_lang)
+    return (
+        "你是剪贴板即时问答助手。请直接、准确地回答用户的问题，"
+        f"默认使用{lang}，除非用户明确要求其他语言。"
+        "不要把问题当成翻译任务，不要复述问题，也不要添加“回答：”之类的前缀。"
+        "简单问题优先给出简洁结论；复杂问题按需要给出必要步骤、公式或代码。"
+        "涉及不确定、时效性或缺少上下文的事实时必须明确说明，不得编造。"
+        "后续用户消息可能是追问，应结合本次应用运行期间此前的问答上下文回答。"
     )
 
 
@@ -117,9 +128,15 @@ class TranslateResult:
 
 
 class OpenAICompatTranslator:
-    def __init__(self, cfg: LlmConfig, target_lang: str = "zh") -> None:
+    def __init__(
+        self,
+        cfg: LlmConfig,
+        target_lang: str = "zh",
+        mode: SessionMode = "translate",
+    ) -> None:
         self._cfg = cfg
         self._target_lang = target_lang
+        self._mode = mode
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -129,8 +146,11 @@ class OpenAICompatTranslator:
         )
         self._url = f"{cfg.base_url.rstrip('/')}/chat/completions"
         self._lock = Lock()
+        self._request_lock = Lock()
         self._day_key = ""
         self._messages: list[dict[str, str]] = []
+        self._prefix_len = 0
+        self._context_generation = 0
         self._reset_messages()
 
     def warm_up(self) -> None:
@@ -144,10 +164,27 @@ class OpenAICompatTranslator:
 
     def _reset_messages(self) -> None:
         self._day_key = date.today().isoformat()
-        self._messages = [
-            {"role": "system", "content": _build_system_prompt(self._target_lang)},
-            *_few_shot_messages(self._target_lang),
-        ]
+        if self._mode == "answer":
+            self._messages = [
+                {
+                    "role": "system",
+                    "content": _build_answer_system_prompt(self._target_lang),
+                }
+            ]
+        else:
+            self._messages = [
+                {
+                    "role": "system",
+                    "content": _build_system_prompt(self._target_lang),
+                },
+                *_few_shot_messages(self._target_lang),
+            ]
+        self._prefix_len = len(self._messages)
+        self._context_generation += 1
+
+    def reset_context(self) -> None:
+        with self._lock:
+            self._reset_messages()
 
     def _ensure_fresh(self, target_lang: str) -> None:
         today = date.today().isoformat()
@@ -155,7 +192,7 @@ class OpenAICompatTranslator:
             self._target_lang = target_lang
             self._reset_messages()
             return
-        if self._day_key != today:
+        if self._mode == "translate" and self._day_key != today:
             self._reset_messages()
 
     def _messages_char_len(self) -> int:
@@ -163,13 +200,33 @@ class OpenAICompatTranslator:
 
     def _trim_if_needed(self) -> None:
         while (
-            len(self._messages) > _PREFIX_LEN + 1
+            len(self._messages) > self._prefix_len + 1
             and self._messages_char_len() > _MAX_MESSAGES_CHARS
         ):
             # 删掉 few-shot 之后最早的一对 user/assistant
-            del self._messages[_PREFIX_LEN : _PREFIX_LEN + 2]
+            del self._messages[self._prefix_len : self._prefix_len + 2]
 
     def translate_stream(
+        self,
+        text: str,
+        target_lang: str,
+        cancel_event: Event,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> TranslateResult:
+        with self._request_lock:
+            return self._stream_locked(text, target_lang, cancel_event, on_delta)
+
+    def answer_stream(
+        self,
+        text: str,
+        target_lang: str,
+        cancel_event: Event,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> TranslateResult:
+        with self._request_lock:
+            return self._stream_locked(text, target_lang, cancel_event, on_delta)
+
+    def _stream_locked(
         self,
         text: str,
         target_lang: str,
@@ -179,6 +236,7 @@ class OpenAICompatTranslator:
         with self._lock:
             self._ensure_fresh(target_lang)
             self._trim_if_needed()
+            context_generation = self._context_generation
             self._messages.append({"role": "user", "content": text})
             # 拷贝快照发给 API，避免流式过程中被并发改动
             messages_payload = list(self._messages)
@@ -219,14 +277,15 @@ class OpenAICompatTranslator:
 
                 if cancel_event.is_set():
                     with self._lock:
-                        self._rollback_last_user()
+                        self._rollback_last_user(text, context_generation)
                     return TranslateResult(text="")
 
                 result = "".join(chunks).strip()
                 with self._lock:
                     # 确认末尾仍是本次 user，再追加 assistant
                     if (
-                        self._messages
+                        self._context_generation == context_generation
+                        and self._messages
                         and self._messages[-1].get("role") == "user"
                         and self._messages[-1].get("content") == text
                     ):
@@ -240,15 +299,21 @@ class OpenAICompatTranslator:
         except Exception:
             with self._lock:
                 if (
-                    self._messages
+                    self._context_generation == context_generation
+                    and self._messages
                     and self._messages[-1].get("role") == "user"
                     and self._messages[-1].get("content") == text
                 ):
-                    self._rollback_last_user()
+                    self._rollback_last_user(text, context_generation)
             raise
 
-    def _rollback_last_user(self) -> None:
-        if self._messages and self._messages[-1].get("role") == "user":
+    def _rollback_last_user(self, text: str, context_generation: int) -> None:
+        if (
+            self._context_generation == context_generation
+            and self._messages
+            and self._messages[-1].get("role") == "user"
+            and self._messages[-1].get("content") == text
+        ):
             self._messages.pop()
 
     @staticmethod

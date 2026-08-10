@@ -105,7 +105,7 @@ class TitleBar(QWidget):
         self.history_btn = QPushButton()
         self.history_btn.setIcon(svg_icon("history", "#c4c7cc", 16))
         self.history_btn.setIconSize(icon_size)
-        self.history_btn.setToolTip("翻译历史")
+        self.history_btn.setToolTip("历史记录")
         self.history_btn.setObjectName("TitleBtn")
         self.history_btn.clicked.connect(self.history_clicked.emit)
 
@@ -175,12 +175,14 @@ class TitleBar(QWidget):
 class TranslatorWindow(QMainWindow):
     history_requested = Signal()
     settings_requested = Signal()
+    clear_answer_requested = Signal()
     pin_changed = Signal(bool)
 
     def __init__(self, always_on_top: bool = True, font_size: int = 12) -> None:
         super().__init__()
         self._always_on_top = always_on_top
         self._font_size = font_size
+        self._mode = "translate"
         self._user_placed = False
         self._anchored_once = False
         self._resize_edges = _ResizeEdge.NONE
@@ -229,8 +231,18 @@ class TranslatorWindow(QMainWindow):
         bottom = QHBoxLayout()
         self.billing = WrappingLabel("")
         self.billing.setObjectName("BillingLabel")
+        self.clear_answer_btn = QPushButton()
+        self.clear_answer_btn.setIcon(svg_icon("rotate-ccw", "#ffffff", 16))
+        self.clear_answer_btn.setIconSize(QSize(16, 16))
+        self.clear_answer_btn.setFixedSize(32, 32)
+        self.clear_answer_btn.setToolTip("清空问答上下文")
+        self.clear_answer_btn.setVisible(False)
+        self.clear_answer_btn.clicked.connect(self.clear_answer_requested.emit)
         self.copy_btn = QPushButton("复制译文")
         bottom.addWidget(self.billing, stretch=1)
+        bottom.addWidget(
+            self.clear_answer_btn, alignment=Qt.AlignmentFlag.AlignBottom
+        )
         bottom.addWidget(self.copy_btn, alignment=Qt.AlignmentFlag.AlignBottom)
 
         body_layout.addWidget(self.src_label)
@@ -430,6 +442,7 @@ class TranslatorWindow(QMainWindow):
         self.dst_label.setFont(label)
         self.status.setFont(status)
         self.billing.setFont(status)
+        self.clear_answer_btn.setFont(status)
         self.copy_btn.setFont(status)
 
     def _apply_window_flags(self) -> None:
@@ -489,6 +502,22 @@ class TranslatorWindow(QMainWindow):
 
     def set_source(self, text: str) -> None:
         self.source.setPlainText(text)
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str) -> None:
+        self._mode = "answer" if mode == "answer" else "translate"
+        answering = self._mode == "answer"
+        self.src_label.setText("问题" if answering else "原文")
+        self.dst_label.setText("回答" if answering else "译文")
+        self.source.setPlaceholderText(
+            "选中的问题出现在这里…" if answering else "复制任意文本后出现在这里…"
+        )
+        self.result.setPlaceholderText("流式回答…" if answering else "流式译文…")
+        self.copy_btn.setText("复制回答" if answering else "复制译文")
+        self.clear_answer_btn.setVisible(answering)
 
     def clear_result(self) -> None:
         self.result.clear()

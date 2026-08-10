@@ -17,6 +17,7 @@ class HistoryEntry:
     ts: str
     source: str
     result: str
+    mode: str = "translate"
     hit: int = 0
     miss: int = 0
     completion: int = 0
@@ -71,6 +72,11 @@ class HistoryStore:
                             ts=str(raw.get("ts", "")),
                             source=str(raw.get("source", "")),
                             result=str(raw.get("result", "")),
+                            mode=(
+                                "answer"
+                                if raw.get("mode") == "answer"
+                                else "translate"
+                            ),
                             hit=int(raw.get("hit", 0) or 0),
                             miss=int(raw.get("miss", 0) or 0),
                             completion=int(raw.get("completion", 0) or 0),

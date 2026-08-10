@@ -35,16 +35,19 @@ class HistoryCard(QFrame):
         layout.setSpacing(4)
 
         ts = entry.ts[-8:] if len(entry.ts) >= 8 else entry.ts
-        self.ts_label = QLabel(ts)
+        mode_label = "问答" if entry.mode == "answer" else "翻译"
+        self.ts_label = QLabel(f"{ts} · {mode_label}")
         self.ts_label.setObjectName("MetaLabel")
 
-        self.src_label = QLabel(f"原文：{entry.source}")
+        source_name = "问题" if entry.mode == "answer" else "原文"
+        result_name = "回答" if entry.mode == "answer" else "译文"
+        self.src_label = QLabel(f"{source_name}：{entry.source}")
         self.src_label.setWordWrap(True)
         self.src_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
 
-        self.dst_label = QLabel(f"译文：{entry.result}")
+        self.dst_label = QLabel(f"{result_name}：{entry.result}")
         self.dst_label.setWordWrap(True)
         self.dst_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
@@ -92,7 +95,7 @@ class HistoryDialog(QDialog):
         super().__init__(parent)
         self._store = store
         self._font_size = font_size
-        self.setWindowTitle("翻译历史")
+        self.setWindowTitle("历史记录")
         self.resize(520, 520)
         self.setWindowFlags(
             self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint

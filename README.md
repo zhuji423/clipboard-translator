@@ -1,6 +1,6 @@
 # Clipboard Translator
 
-常驻剪切板翻译小工具：复制任意文本 → 自动调用你的 OpenAI 兼容 LLM 端点流式翻译 → PySide6 置顶小窗展示。支持 **Windows** 与 **macOS**。
+常驻剪切板翻译与快捷问答工具：复制任意文本 → 自动流式翻译；Windows 选中文本按 `Ctrl+Shift+Q` → 一步复制并连续问答。使用你的 OpenAI 兼容 LLM 端点，通过 PySide6 置顶小窗展示。支持 **Windows** 与 **macOS**。
 
 当前版本见 [`version.py`](version.py)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。Agent 工作流见 [`AGENTS.md`](AGENTS.md)。全部设计/计划/原理文档见 [`docs/`](docs/README.md)；版本与计划对照见 [`docs/VERSION-PLANS.md`](docs/VERSION-PLANS.md)。
 
@@ -52,7 +52,7 @@ api_key = "sk-xxx"
 model = "your-model"
 ```
 
-也可在运行后打开「设置」填写 API URL、API Key 与模型名（保存后立即生效）。
+也可在运行后打开「设置」填写 API URL、API Key 与模型名，并修改 Windows 问答快捷键（保存后立即生效）。
 
 ## 运行
 
@@ -60,7 +60,7 @@ model = "your-model"
 python main.py
 ```
 
-托盘 / 菜单栏图标：显示窗口 / 设置 / 翻译历史 / 暂停监听 / 安装浏览器扩展 / 检查更新 / 退出。
+托盘 / 菜单栏图标：显示窗口 / 设置 / 历史记录 / 清空问答上下文 / 暂停监听 / 安装浏览器扩展 / 检查更新 / 退出。
 
 ## 本地打包
 
@@ -134,6 +134,8 @@ Edge → `edge://extensions` → 打开「开发人员模式」→「加载解�
 
 - 启动时窗口锚定到屏幕可用区域右下角（避开任务栏 / Dock）；可拖动标题栏移动，也可拖边缘 / 四角调整大小，之后不再强拉
 - `QClipboard.dataChanged` 事件监听（非轮询）；复制后约 1s 确认再翻译，避免语音工具短暂改写剪贴板造成闪烁
+- Windows 默认按 `Ctrl+Shift+Q` 一步复制当前选区并回答；快捷键可在设置中修改，普通 `Ctrl+C` 自动翻译保持不变
+- 问答上下文仅在当前进程内连续，翻译与问答会话严格隔离；可从主窗或托盘手动清空
 - LLM `stream=true`，首 token 上屏
 - `requests.Session` 长连接 + LRU 缓存 + 新复制抢占旧任务（含缓存命中）
 - 网页 / 桌面软件 / Steam 等凡是走系统剪切板的来源均可；YouTube 字幕划词另走本机桥接直达（见上节）

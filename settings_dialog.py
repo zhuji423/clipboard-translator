@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sys
 import webbrowser
 from dataclasses import dataclass
+from typing import Callable
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence
 from platform_ui import ui_font
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -11,6 +14,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QKeySequenceEdit,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -22,6 +26,7 @@ from PySide6.QtWidgets import (
 from browser_bridge import DEFAULT_BRIDGE_PORT
 from config import BridgeSettings, LlmConfig
 from distribution import preferred_extension_install_url
+from global_hotkey import parse_hotkey
 from updater import format_version_with_date, local_changelog_date
 from version import __version__
 
@@ -52,6 +57,8 @@ class SettingsDialog(QDialog):
         font_size: int = 12,
         llm: LlmConfig | None = None,
         bridge: BridgeSettings | None = None,
+        question_hotkey: str = "Ctrl+Shift+Q",
+        question_hotkey_applier: Callable[[str], tuple[bool, str]] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -59,7 +66,8 @@ class SettingsDialog(QDialog):
         self.setWindowFlags(
             self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.resize(480, 520)
+        self.resize(500, 590)
+        self._question_hotkey_applier = question_hotkey_applier
 
         llm = llm or LlmConfig(base_url="", api_key="", model="")
         bridge = bridge or BridgeSettings()
@@ -88,6 +96,22 @@ class SettingsDialog(QDialog):
         self.model_edit.setPlaceholderText("模型名")
         form.addRow("模型名", self.model_edit)
         layout.addLayout(form)
+
+        layout.addWidget(QLabel("快捷操作"))
+        shortcut_form = QFormLayout()
+        shortcut_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.question_hotkey_edit = QKeySequenceEdit(QKeySequence(question_hotkey))
+        self.question_hotkey_edit.setClearButtonEnabled(True)
+        self.question_hotkey_edit.setToolTip(
+            "Windows 全局快捷键：选中文本后一步复制并用连续会话回答"
+        )
+        shortcut_form.addRow("选区问答", self.question_hotkey_edit)
+        if sys.platform != "win32":
+            self.question_hotkey_edit.setEnabled(False)
+            platform_note = QLabel("当前平台暂不支持全局问答快捷键")
+            platform_note.setObjectName("MetaLabel")
+            shortcut_form.addRow("", platform_note)
+        layout.addLayout(shortcut_form)
 
         layout.addWidget(QLabel("浏览器集成（YouTube 字幕点词）"))
         bridge_form = QFormLayout()
@@ -171,8 +195,8 @@ class SettingsDialog(QDialog):
             """
             QDialog, QWidget { background: #1e1f22; color: #e8eaed; }
             QLabel { color: #c4c7cc; }
-            QSpinBox, QSlider, QLineEdit, QCheckBox { color: #e8eaed; }
-            QLineEdit {
+            QSpinBox, QSlider, QLineEdit, QKeySequenceEdit, QCheckBox { color: #e8eaed; }
+            QLineEdit, QKeySequenceEdit {
                 background: #2b2d31;
                 border: 1px solid #3c4048;
                 border-radius: 6px;
@@ -191,6 +215,7 @@ class SettingsDialog(QDialog):
                 background: #4a4d55;
                 color: #9aa0a6;
             }
+            #MetaLabel { color: #9aa0a6; }
             """
         )
         self._preview_font(font_size)
@@ -238,6 +263,20 @@ class SettingsDialog(QDialog):
         if not base_url or not model:
             QMessageBox.warning(self, "设置", "API URL 与模型名不能为空。")
             return
+        if sys.platform == "win32":
+            hotkey_text = self.question_hotkey_edit.keySequence().toString(
+                QKeySequence.SequenceFormat.PortableText
+            )
+            try:
+                hotkey_text = parse_hotkey(hotkey_text).text
+            except ValueError as exc:
+                QMessageBox.warning(self, "设置", str(exc))
+                return
+            if self._question_hotkey_applier is not None:
+                applied, error = self._question_hotkey_applier(hotkey_text)
+                if not applied:
+                    QMessageBox.warning(self, "设置", error)
+                    return
         self.llm_settings_changed.emit(
             LlmSettingsValues(base_url=base_url, api_key=api_key, model=model)
         )

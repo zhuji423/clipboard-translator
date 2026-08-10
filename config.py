@@ -29,6 +29,7 @@ class AppConfig:
     always_on_top: bool = True
     cache_size: int = 128
     font_size: int = 12
+    question_hotkey: str = "Ctrl+Shift+Q"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,9 @@ def load_config(path: Path | None = None) -> Config:
             always_on_top=bool(app_raw.get("always_on_top", True)),
             cache_size=int(app_raw.get("cache_size", 128)),
             font_size=max(10, min(22, int(app_raw.get("font_size", 12)))),
+            question_hotkey=str(
+                app_raw.get("question_hotkey", "Ctrl+Shift+Q")
+            ).strip(),
         ),
         bridge=BridgeSettings(
             enabled=bool(bridge_raw.get("enabled", True)),
@@ -128,6 +132,13 @@ def save_font_size(size: int, path: Path | None = None) -> None:
         text = re.sub(r"(?m)^(\[app\]\s*)$", rf"\1\nfont_size = {size}", text, count=1)
     else:
         text = text.rstrip() + f"\n\n[app]\nfont_size = {size}\n"
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def save_question_hotkey(hotkey: str, path: Path | None = None) -> None:
+    cfg_path = path or config_path()
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_string(text, "question_hotkey", hotkey.strip(), "app")
     cfg_path.write_text(text, encoding="utf-8")
 
 

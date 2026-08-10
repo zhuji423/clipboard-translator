@@ -32,12 +32,14 @@ from config import (
     save_bridge_token,
     save_font_size,
     save_llm_settings,
+    save_question_hotkey,
 )
 from distribution import ONBOARDING_URL, preferred_extension_install_url
 from native_messaging import register_native_messaging_host
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from macos_clipboard import MacClipboardPoller
+from global_hotkey import GlobalHotkeyManager, WindowsSelectionInput
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
@@ -64,11 +66,14 @@ from word_lookup import WordLookupService, cache_key, normalize_context, normali
 CLIPBOARD_SETTLE_MS = 350
 CLIPBOARD_CONFIRM_MS = 800
 COPY_IGNORE_MS = 300
+QUESTION_CAPTURE_TIMEOUT_MS = 1200
+QUESTION_CAPTURE_POLL_MS = 20
+QUESTION_COPY_RELEASE_MS = 1000
 
 
 class TranslateWorker(QObject):
     delta = Signal(int, str)  # generation, chunk
-    finished = Signal(int, str, str, object)  # generation, source, result, UsageInfo
+    finished = Signal(int, str, str, str, object)  # generation, mode, source, result, usage
     failed = Signal(int, str)  # generation, error
     done = Signal()
 
@@ -79,6 +84,7 @@ class TranslateWorker(QObject):
         target_lang: str,
         cancel_event: Event,
         generation: int,
+        mode: str = "translate",
     ) -> None:
         super().__init__()
         self._translator = translator
@@ -86,11 +92,17 @@ class TranslateWorker(QObject):
         self._target_lang = target_lang
         self._cancel_event = cancel_event
         self._generation = generation
+        self._mode = mode
 
     @Slot()
     def run(self) -> None:
         try:
-            result = self._translator.translate_stream(
+            method = (
+                self._translator.answer_stream
+                if self._mode == "answer"
+                else self._translator.translate_stream
+            )
+            result = method(
                 self._text,
                 self._target_lang,
                 self._cancel_event,
@@ -99,6 +111,7 @@ class TranslateWorker(QObject):
             if not self._cancel_event.is_set():
                 self.finished.emit(
                     self._generation,
+                    self._mode,
                     self._text,
                     result.text,
                     result.usage,
@@ -192,6 +205,9 @@ class AppController(QObject):
         self._translator = OpenAICompatTranslator(
             cfg.llm, target_lang=cfg.app.target_lang
         )
+        self._answerer = OpenAICompatTranslator(
+            cfg.llm, target_lang=cfg.app.target_lang, mode="answer"
+        )
         self._cache = LruCache(cfg.app.cache_size)
         self._history = HistoryStore()
         self._history_dialog: HistoryDialog | None = None
@@ -206,6 +222,13 @@ class AppController(QObject):
         self._cancel_event: Event | None = None
         self._thread: QThread | None = None
         self._worker: TranslateWorker | None = None
+        self._tasks: dict[int, tuple[QThread, TranslateWorker]] = {}
+        self._current_mode = "translate"
+        self._question_capture_state = ""
+        self._question_capture_sequence = 0
+        self._question_capture_deadline_ms = 0
+        self._question_copied_text = ""
+        self._question_copy_generation = 0
         self._billing_generation = 0
         self._billing_thread: QThread | None = None
         self._billing_worker: BalanceWorker | None = None
@@ -223,6 +246,18 @@ class AppController(QObject):
         self._lookup = WordLookupService(cfg.llm)
         self._lookup_cache = LruCache(max(32, cfg.app.cache_size))
         self._settings_dialog: SettingsDialog | None = None
+        self._hotkey_manager = GlobalHotkeyManager(parent=self)
+        self._selection_input = (
+            WindowsSelectionInput() if self._hotkey_manager.supported else None
+        )
+        self._question_hotkey_error = ""
+        self._hotkey_manager.activated.connect(self.capture_question_selection)
+        if self._hotkey_manager.supported:
+            registered, error = self._hotkey_manager.rebind(
+                cfg.app.question_hotkey
+            )
+            if not registered:
+                self._question_hotkey_error = error
         self.bridge_token_changed.connect(self._apply_bridge_token_on_ui)
         self.bridge_lookup_recorded.connect(self.refresh_billing)
         self.bridge_translate_requested.connect(self._on_bridge_translate_requested)
@@ -244,7 +279,14 @@ class AppController(QObject):
         self._confirm_timer.setInterval(CLIPBOARD_CONFIRM_MS)
         self._confirm_timer.timeout.connect(self._on_clipboard_confirmed)
 
+        self._question_capture_timer = QTimer(self)
+        self._question_capture_timer.setInterval(QUESTION_CAPTURE_POLL_MS)
+        self._question_capture_timer.timeout.connect(
+            self._poll_question_selection_capture
+        )
+
         self._translator.warm_up()
+        self._answerer.warm_up()
         if cfg.bridge.enabled:
             self._bridge.start()
 
@@ -257,6 +299,7 @@ class AppController(QObject):
             self._mac_clip_poller.changed.connect(self.on_clipboard_changed)
             self._mac_clip_poller.start()
         self._window.copy_btn.clicked.connect(self.copy_translation)
+        self._window.clear_answer_requested.connect(self.clear_answer_context)
         self._window.history_requested.connect(self.open_history)
         self._window.settings_requested.connect(self.open_settings)
         self.refresh_billing()
@@ -264,7 +307,14 @@ class AppController(QObject):
     def shutdown(self) -> None:
         if self._mac_clip_poller is not None:
             self._mac_clip_poller.stop()
+        self._question_capture_timer.stop()
+        self._hotkey_manager.close()
+        self._cancel_current()
         self._bridge.stop()
+
+    @property
+    def question_hotkey_error(self) -> str:
+        return self._question_hotkey_error
 
     def _bridge_config(self) -> BridgeConfig:
         b = self._cfg.bridge
@@ -371,12 +421,101 @@ class AppController(QObject):
         self._window.set_status("监听中" if enabled else "已暂停")
 
     @Slot()
+    def capture_question_selection(self) -> None:
+        if self._selection_input is None:
+            self._window.set_status("全局问答快捷键当前仅支持 Windows", error=True)
+            return
+        self._abort_clipboard_pending()
+        self._invalidate_inflight()
+        self._question_capture_state = "waiting_release"
+        self._question_capture_deadline_ms = (
+            QDateTime.currentMSecsSinceEpoch() + QUESTION_CAPTURE_TIMEOUT_MS
+        )
+        self._window.set_mode("answer")
+        self._window.set_status("正在复制问题…")
+        self._question_capture_timer.start()
+
+    @Slot()
+    def _poll_question_selection_capture(self) -> None:
+        if not self._question_capture_state or self._selection_input is None:
+            self._question_capture_timer.stop()
+            return
+        if QDateTime.currentMSecsSinceEpoch() >= self._question_capture_deadline_ms:
+            self._fail_question_selection_capture()
+            return
+
+        if self._question_capture_state == "waiting_release":
+            if not self._selection_input.modifiers_released():
+                return
+            self._question_capture_sequence = (
+                self._selection_input.clipboard_sequence()
+            )
+            self._question_capture_state = "waiting_clipboard"
+            if not self._selection_input.send_copy():
+                self._fail_question_selection_capture("无法发送复制快捷键")
+            return
+
+        if (
+            self._selection_input.clipboard_sequence()
+            != self._question_capture_sequence
+        ):
+            self._consume_question_selection()
+
+    def _consume_question_selection(self) -> None:
+        text = self._normalize_clipboard_text(QGuiApplication.clipboard().text())
+        self._question_capture_state = ""
+        self._question_capture_timer.stop()
+        if text is None:
+            self._fail_question_selection_capture()
+            return
+        self._question_copied_text = text
+        self._apply_question_text(text)
+        self._question_copy_generation = self._generation
+
+    def _fail_question_selection_capture(
+        self, message: str = "未检测到选中文本"
+    ) -> None:
+        self._question_capture_state = ""
+        self._question_capture_timer.stop()
+        self._window.show_raised()
+        self._window.set_status(message, error=True)
+
+    def apply_question_hotkey(self, hotkey: str) -> tuple[bool, str]:
+        old_hotkey = self._cfg.app.question_hotkey
+        registered, error = self._hotkey_manager.rebind(hotkey)
+        if not registered:
+            return False, error
+        try:
+            save_question_hotkey(self._hotkey_manager.shortcut)
+        except Exception as exc:  # noqa: BLE001
+            self._hotkey_manager.rebind(old_hotkey)
+            return False, f"保存问答快捷键失败：{exc}"
+        self._cfg = replace(
+            self._cfg,
+            app=replace(
+                self._cfg.app,
+                question_hotkey=self._hotkey_manager.shortcut,
+            ),
+        )
+        self._question_hotkey_error = ""
+        return True, ""
+
+    @Slot()
+    def clear_answer_context(self) -> None:
+        self._invalidate_inflight()
+        self._answerer.reset_context()
+        if self._window.mode == "answer":
+            self._window.set_status("问答上下文已清空")
+
+    @Slot()
     def open_settings(self) -> None:
         dialog = SettingsDialog(
-            self._font_size,
-            self._cfg.llm,
-            self._cfg.bridge,
-            self._window,
+            font_size=self._font_size,
+            llm=self._cfg.llm,
+            bridge=self._cfg.bridge,
+            question_hotkey=self._cfg.app.question_hotkey,
+            question_hotkey_applier=self.apply_question_hotkey,
+            parent=self._window,
         )
         self._settings_dialog = dialog
         dialog.font_size_changed.connect(self.apply_font_size)
@@ -423,13 +562,13 @@ class AppController(QObject):
         worker.done.connect(thread.quit, queued)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_update_check_thread_finished)
+        thread.destroyed.connect(self._on_update_check_thread_destroyed)
         self._update_check_thread = thread
         self._update_check_worker = worker
         thread.start()
 
     @Slot()
-    def _on_update_check_thread_finished(self) -> None:
+    def _on_update_check_thread_destroyed(self) -> None:
         self._update_check_thread = None
         self._update_check_worker = None
 
@@ -531,13 +670,13 @@ class AppController(QObject):
         worker.done.connect(thread.quit, queued)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_update_download_thread_finished)
+        thread.destroyed.connect(self._on_update_download_thread_destroyed)
         self._update_download_thread = thread
         self._update_download_worker = worker
         thread.start()
 
     @Slot()
-    def _on_update_download_thread_finished(self) -> None:
+    def _on_update_download_thread_destroyed(self) -> None:
         self._update_download_thread = None
         self._update_download_worker = None
 
@@ -622,8 +761,12 @@ class AppController(QObject):
         self._translator = OpenAICompatTranslator(
             llm, target_lang=self._cfg.app.target_lang
         )
+        self._answerer = OpenAICompatTranslator(
+            llm, target_lang=self._cfg.app.target_lang, mode="answer"
+        )
         self._lookup.update_config(llm)
         self._translator.warm_up()
+        self._answerer.warm_up()
         self.refresh_billing()
 
     @Slot(object)
@@ -700,7 +843,10 @@ class AppController(QObject):
             return
         self._invalidate_inflight()
         self._abort_clipboard_pending()
-        self._last_text = entry.source.strip()
+        if entry.mode == "translate":
+            self._last_text = entry.source.strip()
+        self._current_mode = entry.mode
+        self._window.set_mode(entry.mode)
         self._window.set_source(entry.source)
         self._window.set_result(entry.result)
         if entry.note == "local_cache":
@@ -724,7 +870,8 @@ class AppController(QObject):
             QDateTime.currentMSecsSinceEpoch() + COPY_IGNORE_MS
         )
         QGuiApplication.clipboard().setText(text)
-        self._window.set_status("已复制译文")
+        copied_name = "回答" if self._window.mode == "answer" else "译文"
+        self._window.set_status(f"已复制{copied_name}")
 
     def _should_ignore_clipboard(self, text: str) -> bool:
         if (
@@ -756,6 +903,22 @@ class AppController(QObject):
 
     @Slot()
     def on_clipboard_changed(self) -> None:
+        if self._question_capture_state:
+            if (
+                self._question_capture_state == "waiting_clipboard"
+                and self._selection_input is not None
+                and self._selection_input.clipboard_sequence()
+                != self._question_capture_sequence
+            ):
+                self._consume_question_selection()
+            return
+        if self._question_copied_text:
+            repeated = self._normalize_clipboard_text(
+                QGuiApplication.clipboard().text()
+            )
+            if repeated == self._question_copied_text:
+                return
+            self._question_copied_text = ""
         if not self._listening:
             return
 
@@ -825,8 +988,10 @@ class AppController(QObject):
 
     def _apply_clipboard_text(self, text: str) -> None:
         self._last_text = text
+        self._current_mode = "translate"
         self._window.show_raised()
         self._invalidate_inflight()
+        self._window.set_mode("translate")
         self._window.set_source(text)
         self._window.clear_result()
 
@@ -844,27 +1009,41 @@ class AppController(QObject):
                     ts=now_ts(),
                     source=text,
                     result=cached,
+                    mode="translate",
                     note="local_cache",
                 )
             )
             self.refresh_billing()
             return
 
-        self._start_translate(text)
+        self._start_request(text, "translate")
+
+    def _apply_question_text(self, text: str) -> None:
+        self._current_mode = "answer"
+        self._window.show_raised()
+        self._invalidate_inflight()
+        self._window.set_mode("answer")
+        self._window.set_source(text)
+        self._window.clear_result()
+        self._start_request(text, "answer")
 
     def _start_translate(self, text: str) -> None:
-        # Generation already bumped by _apply_clipboard_text / _invalidate_inflight.
+        self._start_request(text, "translate")
+
+    def _start_request(self, text: str, mode: str) -> None:
         generation = self._generation
         cancel_event = Event()
         self._cancel_event = cancel_event
 
         thread = QThread()
+        session = self._answerer if mode == "answer" else self._translator
         worker = TranslateWorker(
-            self._translator,
+            session,
             text,
             self._cfg.app.target_lang,
             cancel_event,
             generation,
+            mode,
         )
         worker.moveToThread(thread)
 
@@ -876,11 +1055,23 @@ class AppController(QObject):
         worker.done.connect(thread.quit, queued)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        thread.destroyed.connect(
+            lambda _obj=None, generation=generation: self._on_task_thread_destroyed(
+                generation
+            )
+        )
 
         self._thread = thread
         self._worker = worker
-        self._window.set_status("翻译中…")
+        self._tasks[generation] = (thread, worker)
+        self._window.set_status("回答中…" if mode == "answer" else "翻译中…")
         thread.start()
+
+    def _on_task_thread_destroyed(self, generation: int) -> None:
+        refs = self._tasks.pop(generation, None)
+        if refs is not None and self._thread is refs[0]:
+            self._thread = None
+            self._worker = None
 
     def _cancel_current(self) -> None:
         if self._cancel_event is not None:
@@ -892,16 +1083,24 @@ class AppController(QObject):
             return
         self._window.append_result(chunk)
 
-    @Slot(int, str, str, object)
+    @Slot(int, str, str, str, object)
     def _on_finished(
-        self, generation: int, source: str, result: str, usage: object
+        self,
+        generation: int,
+        mode: str,
+        source: str,
+        result: str,
+        usage: object,
     ) -> None:
         if generation != self._generation:
             return
         info = usage if isinstance(usage, UsageInfo) else UsageInfo()
         if result:
             self._window.set_result(result)
-            self._cache.put(f"{self._cfg.app.target_lang}\n{source}", result)
+            if mode == "translate":
+                self._cache.put(
+                    f"{self._cfg.app.target_lang}\n{source}", result
+                )
         cost = estimate_cost(
             self._cfg.llm.model, info.hit, info.miss, info.completion
         )
@@ -912,6 +1111,7 @@ class AppController(QObject):
                     ts=now_ts(),
                     source=source,
                     result=result,
+                    mode=("answer" if mode == "answer" else "translate"),
                     hit=cost.hit,
                     miss=cost.miss,
                     completion=cost.completion,
@@ -921,12 +1121,30 @@ class AppController(QObject):
                 )
             )
         self.refresh_billing()
+        if mode == "answer":
+            QTimer.singleShot(
+                QUESTION_COPY_RELEASE_MS,
+                lambda generation=generation: self._release_question_copy(
+                    generation
+                ),
+            )
 
     @Slot(int, str)
     def _on_failed(self, generation: int, error: str) -> None:
         if generation != self._generation:
             return
         self._window.set_status(f"失败: {error}", error=True)
+        if self._current_mode == "answer":
+            QTimer.singleShot(
+                QUESTION_COPY_RELEASE_MS,
+                lambda generation=generation: self._release_question_copy(
+                    generation
+                ),
+            )
+
+    def _release_question_copy(self, generation: int) -> None:
+        if generation == self._question_copy_generation:
+            self._question_copied_text = ""
 
     def _render_billing(self) -> None:
         used = self._history.sum_day_cost()
@@ -964,14 +1182,14 @@ class AppController(QObject):
         worker.done.connect(thread.quit, queued)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_billing_thread_finished)
+        thread.destroyed.connect(self._on_billing_thread_destroyed)
 
         self._billing_thread = thread
         self._billing_worker = worker
         thread.start()
 
     @Slot()
-    def _on_billing_thread_finished(self) -> None:
+    def _on_billing_thread_destroyed(self) -> None:
         self._billing_fetching = False
         self._billing_thread = None
         self._billing_worker = None
@@ -1075,9 +1293,13 @@ def main() -> int:
     act_settings.triggered.connect(controller.open_settings)
     menu.addAction(act_settings)
 
-    act_history = QAction("翻译历史", menu)
+    act_history = QAction("历史记录", menu)
     act_history.triggered.connect(controller.open_history)
     menu.addAction(act_history)
+
+    act_clear_answer = QAction("清空问答上下文", menu)
+    act_clear_answer.triggered.connect(controller.clear_answer_context)
+    menu.addAction(act_clear_answer)
 
     act_pause = QAction("暂停监听", menu)
     act_pause.setCheckable(True)
@@ -1120,6 +1342,13 @@ def main() -> int:
 
         tray.activated.connect(on_tray_activated)
         tray.show()
+        if controller.question_hotkey_error:
+            tray.showMessage(
+                "问答快捷键不可用",
+                controller.question_hotkey_error,
+                QSystemTrayIcon.MessageIcon.Warning,
+                8000,
+            )
         if is_frozen() and cfg.bridge.enabled and not (cfg.bridge.token or "").strip():
             tray.showMessage(
                 "Clipboard Translator",
