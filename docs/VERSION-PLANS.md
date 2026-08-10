@@ -168,6 +168,20 @@
 | 编写/使用的计划 | [`macos-fullscreen-overlay`](plans/history/macos-fullscreen-overlay.md) |
 | 完成工作 | 修正全屏叠层：`fullScreenAuxiliary` 仅对 NSPanel 生效；用不可见锚点 Panel + `addChildWindow` 让翻译窗出现在原生全屏 Space 上；保留 Dock |
 
+### 0.9.8
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`app-icon-bubbles`](plans/history/app-icon-bubbles.md) |
+| 完成工作 | 换用双气泡「A / 译」轻快图标；`generate_app_icon.py` 优先从 `app-icon-source.png` 生成多尺寸资源 |
+
+### 0.9.9
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`app-icon-bubbles`](plans/history/app-icon-bubbles.md)（Dock 安全区补丁） |
+| 完成工作 | 图标生成增加约 80% 居中缩放，修正 Dock 上视觉偏大 |
+
 ---
 
 ## 未完成 / 暂停（todo）

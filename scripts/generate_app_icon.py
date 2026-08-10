@@ -1,4 +1,8 @@
-"""Generate assets/app.ico, app.png, and (on macOS) app.icns from clipboard SVG."""
+"""Generate assets/app.ico, app.png, and (on macOS) app.icns.
+
+Prefer assets/app-icon-source.png when present; otherwise render from
+assets/icons/clipboard.svg on a solid brand background.
+"""
 
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ except ImportError:
     raise SystemExit(1)
 
 ROOT = Path(__file__).resolve().parent.parent
+SOURCE_PNG = ROOT / "assets" / "app-icon-source.png"
 SVG_PATH = ROOT / "assets" / "icons" / "clipboard.svg"
 OUT_ICO = ROOT / "assets" / "app.ico"
 OUT_PNG = ROOT / "assets" / "app.png"
@@ -39,6 +44,9 @@ ICNS_SIZES = (
     (1024, "walt.e@example.net"),
 )
 BG = QColor("#3c78d8")
+# macOS Dock masks the full canvas; AI squircles often fill edge-to-edge and look
+# oversized next to HIG icons. Keep content ~80% centered (Apple-ish safe area).
+DOCK_CONTENT_SCALE = 0.80
 
 
 def _qimage_to_pil(image: QImage) -> Image.Image:
@@ -50,7 +58,42 @@ def _qimage_to_pil(image: QImage) -> Image.Image:
     return Image.open(io.BytesIO(bytes(ba))).convert("RGBA")
 
 
-def _render_size(size: int) -> Image.Image:
+def _knockout_black_corners(im: Image.Image, threshold: int = 12) -> Image.Image:
+    """Make near-black canvas outside the squircle transparent (menu bar / Dock)."""
+    rgba = im.convert("RGBA")
+    pixels = rgba.load()
+    assert pixels is not None
+    w, h = rgba.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = pixels[x, y]
+            if a and r <= threshold and g <= threshold and b <= threshold:
+                pixels[x, y] = (0, 0, 0, 0)
+    return rgba
+
+
+def _fit_dock_safe_area(
+    im: Image.Image, scale: float = DOCK_CONTENT_SCALE
+) -> Image.Image:
+    """Shrink artwork into the center so Dock size matches neighboring apps."""
+    rgba = im.convert("RGBA")
+    w, h = rgba.size
+    scale = max(0.5, min(1.0, scale))
+    if scale >= 0.999:
+        return rgba
+    inner_w = max(1, int(round(w * scale)))
+    inner_h = max(1, int(round(h * scale)))
+    fitted = rgba.resize((inner_w, inner_h), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    canvas.paste(fitted, ((w - inner_w) // 2, (h - inner_h) // 2), fitted)
+    return canvas
+
+
+def _render_from_source(size: int, source: Image.Image) -> Image.Image:
+    return source.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def _render_from_svg(size: int) -> Image.Image:
     image = QImage(size, size, QImage.Format.Format_ARGB32)
     image.fill(QColor(0, 0, 0, 0))
     painter = QPainter(image)
@@ -91,12 +134,9 @@ def _write_icns(images_by_size: dict[int, Image.Image]) -> None:
     iconset.mkdir(parents=True)
 
     for size, name in ICNS_SIZES:
-        if size in images_by_size:
-            im = images_by_size[size]
-        else:
-            im = _render_size(size)
-            images_by_size[size] = im
-        im.save(iconset / name, format="PNG")
+        if size not in images_by_size:
+            raise KeyError(f"missing icon size {size}")
+        images_by_size[size].save(iconset / name, format="PNG")
 
     subprocess.run(
         ["iconutil", "-c", "icns", str(iconset), "-o", str(OUT_ICNS)],
@@ -107,15 +147,28 @@ def _write_icns(images_by_size: dict[int, Image.Image]) -> None:
 
 
 def main() -> int:
-    QApplication([])
-    if not SVG_PATH.exists():
-        print(f"Missing {SVG_PATH}", file=sys.stderr)
-        return 1
+    need_qt = not SOURCE_PNG.is_file()
+    if need_qt:
+        QApplication([])
+        if not SVG_PATH.exists():
+            print(f"Missing {SOURCE_PNG} and {SVG_PATH}", file=sys.stderr)
+            return 1
+        source: Image.Image | None = None
+        print(f"Using SVG fallback: {SVG_PATH}")
+    else:
+        source = _fit_dock_safe_area(_knockout_black_corners(Image.open(SOURCE_PNG)))
+        print(
+            f"Using source PNG: {SOURCE_PNG} "
+            f"({source.size[0]}x{source.size[1]}, dock scale={DOCK_CONTENT_SCALE})"
+        )
 
-    images_by_size: dict[int, Image.Image] = {s: _render_size(s) for s in SIZES}
-    # Extra sizes for icns / high-DPI
-    for extra in (512, 1024):
-        images_by_size[extra] = _render_size(extra)
+    def render(size: int) -> Image.Image:
+        if source is not None:
+            return _render_from_source(size, source)
+        return _render_from_svg(size)
+
+    needed = set(SIZES) | {s for s, _ in ICNS_SIZES}
+    images_by_size: dict[int, Image.Image] = {s: render(s) for s in sorted(needed)}
 
     OUT_ICO.parent.mkdir(parents=True, exist_ok=True)
     ico_images = [images_by_size[s] for s in SIZES]
