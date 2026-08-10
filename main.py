@@ -37,6 +37,7 @@ from distribution import ONBOARDING_URL, preferred_extension_install_url
 from native_messaging import register_native_messaging_host
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
+from macos_clipboard import MacClipboardPoller
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
@@ -248,12 +249,21 @@ class AppController(QObject):
             self._bridge.start()
 
         QGuiApplication.clipboard().dataChanged.connect(self.on_clipboard_changed)
+        # macOS: Qt only delivers cross-app clipboard changes when activated;
+        # poll NSPasteboard.changeCount so menu-bar / background copy still works.
+        self._mac_clip_poller: MacClipboardPoller | None = None
+        if sys.platform == "darwin":
+            self._mac_clip_poller = MacClipboardPoller(parent=self)
+            self._mac_clip_poller.changed.connect(self.on_clipboard_changed)
+            self._mac_clip_poller.start()
         self._window.copy_btn.clicked.connect(self.copy_translation)
         self._window.history_requested.connect(self.open_history)
         self._window.settings_requested.connect(self.open_settings)
         self.refresh_billing()
 
     def shutdown(self) -> None:
+        if self._mac_clip_poller is not None:
+            self._mac_clip_poller.stop()
         self._bridge.stop()
 
     def _bridge_config(self) -> BridgeConfig:

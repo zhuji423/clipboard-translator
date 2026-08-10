@@ -8,6 +8,13 @@
 
 - 文档与计划统一迁入 `docs/`：设计说明、历史计划归档、未做功能目录 `docs/todo/` 与「版本↔计划↔完成工作」对照表；根目录不再放置 `PLAN-*.md`
 
+## [0.9.6] - 2026-08-10
+
+### Fixed
+
+- macOS：后台 / 菜单栏常驻时也能感知其他应用的 ⌘C（轮询 `NSPasteboard.changeCount`）；Windows 仍只用 Qt `dataChanged`
+- macOS：置顶翻译窗可出现在系统全屏 Space 之上（`canJoinAllSpaces` + `fullScreenAuxiliary`）；Windows 行为不变
+
 ## [0.9.5] - 2026-08-09
 
 ### Added

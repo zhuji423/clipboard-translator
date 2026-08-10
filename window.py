@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from enum import IntFlag
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, Signal
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from icons import svg_icon, title_icon_pair
+from macos_window import apply_overlay_space_behavior
 
 _RESIZE_MARGIN = 6
 
@@ -453,8 +455,13 @@ class TranslatorWindow(QMainWindow):
         y = geo.bottom() - self.height() - margin
         self.move(max(geo.left(), x), max(geo.top(), y))
 
+    def _apply_macos_overlay_behavior(self) -> None:
+        if sys.platform == "darwin":
+            apply_overlay_space_behavior(self)
+
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         super().showEvent(event)
+        self._apply_macos_overlay_behavior()
         if not self._anchored_once and not self._user_placed:
             self._anchor_bottom_right()
             self._anchored_once = True
@@ -467,11 +474,13 @@ class TranslatorWindow(QMainWindow):
         if visible:
             self.show()
             self.setGeometry(geom)
+            self._apply_macos_overlay_behavior()
         self.pin_changed.emit(pinned)
 
     def show_raised(self) -> None:
         """Show and raise without stealing keyboard focus."""
         self.show()
+        self._apply_macos_overlay_behavior()
         self.raise_()
 
     def show_and_raise(self) -> None:

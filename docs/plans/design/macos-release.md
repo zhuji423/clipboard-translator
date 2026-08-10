@@ -6,6 +6,8 @@
 - CI：`.github/workflows/release-macos.yml`（`macos-latest`）
 - 本地：`./scripts/build_macos.sh`
 - 配置/历史：`~/Library/Application Support/ClipboardTranslator`
+- 后台剪贴板：Qt `dataChanged` 在 macOS 不可靠，运行时用 `NSPasteboard.changeCount` 轮询（见 `macos_clipboard.py`）
+- 全屏叠层：主窗 `NSWindowCollectionBehaviorCanJoinAllSpaces | FullScreenAuxiliary`（见 `macos_window.py`），否则系统全屏 Space 会挡住置顶窗
 - 产物未签名：用户需在 Finder 中右键 → 打开（首次 Gatekeeper）
 
 ## 后续（需 Apple Developer Program）
