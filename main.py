@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import sys
 import webbrowser
 from pathlib import Path
@@ -48,6 +49,12 @@ from pricing import estimate_cost, format_billing_line, format_status_lines
 from speech import SpeechService
 from settings_dialog import BridgeSettingsValues, LlmSettingsValues, SettingsDialog
 from translator import OpenAICompatTranslator, UsageInfo
+from translation_context import (
+    RollingTranslationContext,
+    TranslationContext,
+    TranslationRequest,
+    translation_cache_key,
+)
 from updater import (
     RELEASES_PAGE,
     ReleaseInfo,
@@ -77,7 +84,7 @@ MANUAL_INPUT_HOTKEY_ID = 0x434D
 
 class TranslateWorker(QObject):
     delta = Signal(int, str)  # generation, chunk
-    finished = Signal(int, str, str, str, object)  # generation, mode, source, result, usage
+    finished = Signal(int, str, str, str, object, object)
     failed = Signal(int, str)  # generation, error
     done = Signal()
 
@@ -89,6 +96,7 @@ class TranslateWorker(QObject):
         cancel_event: Event,
         generation: int,
         mode: str = "translate",
+        context: TranslationContext = TranslationContext(),
     ) -> None:
         super().__init__()
         self._translator = translator
@@ -97,21 +105,27 @@ class TranslateWorker(QObject):
         self._cancel_event = cancel_event
         self._generation = generation
         self._mode = mode
+        self._context = context
 
     @Slot()
     def run(self) -> None:
         try:
-            method = (
-                self._translator.answer_stream
-                if self._mode == "answer"
-                else self._translator.translate_stream
-            )
-            result = method(
-                self._text,
-                self._target_lang,
-                self._cancel_event,
-                on_delta=lambda chunk: self.delta.emit(self._generation, chunk),
-            )
+            on_delta = lambda chunk: self.delta.emit(self._generation, chunk)
+            if self._mode == "answer":
+                result = self._translator.answer_stream(
+                    self._text,
+                    self._target_lang,
+                    self._cancel_event,
+                    on_delta=on_delta,
+                )
+            else:
+                result = self._translator.translate_stream(
+                    self._text,
+                    self._target_lang,
+                    self._cancel_event,
+                    on_delta=on_delta,
+                    context=self._context,
+                )
             if not self._cancel_event.is_set():
                 self.finished.emit(
                     self._generation,
@@ -119,6 +133,7 @@ class TranslateWorker(QObject):
                     self._text,
                     result.text,
                     result.usage,
+                    self._context,
                 )
         except Exception as exc:  # noqa: BLE001 - surface to UI
             if not self._cancel_event.is_set():
@@ -200,7 +215,7 @@ class UpdateDownloadWorker(QObject):
 class AppController(QObject):
     bridge_token_changed = Signal(str)
     bridge_lookup_recorded = Signal()
-    bridge_translate_requested = Signal(str)
+    bridge_translate_requested = Signal(object)
 
     def __init__(self, cfg: Config, window: TranslatorWindow) -> None:
         super().__init__()
@@ -214,6 +229,8 @@ class AppController(QObject):
             cfg.llm, target_lang=cfg.app.target_lang, mode="answer"
         )
         self._cache = LruCache(cfg.app.cache_size)
+        self._clipboard_context = RollingTranslationContext()
+        self._translation_context_session = secrets.token_urlsafe(16)
         self._history = HistoryStore()
         self._history_dialog: HistoryDialog | None = None
         self._font_size = cfg.app.font_size
@@ -295,8 +312,9 @@ class AppController(QObject):
             config_provider=self._bridge_config,
             target_lang_provider=lambda: self._cfg.app.target_lang,
             on_lookup=self._bridge_lookup,
-            on_translate=lambda text: self.bridge_translate_requested.emit(text),
+            on_translate=lambda request: self.bridge_translate_requested.emit(request),
             on_token_saved=lambda token: self.bridge_token_changed.emit(token),
+            context_session_provider=lambda: self._translation_context_session,
         )
 
         self._settle_timer = QTimer(self)
@@ -329,7 +347,7 @@ class AppController(QObject):
             self._mac_clip_poller.changed.connect(self.on_clipboard_changed)
             self._mac_clip_poller.start()
         self._window.copy_btn.clicked.connect(self.copy_translation)
-        self._window.clear_answer_requested.connect(self.clear_answer_context)
+        self._window.clear_context_requested.connect(self.clear_current_context)
         self._window.history_requested.connect(self.open_history)
         self._window.settings_requested.connect(self.open_settings)
         self._window.source_speak_requested.connect(self._toggle_source_speech)
@@ -388,7 +406,7 @@ class AppController(QObject):
             self._window.set_status("输入内容太短或为空", error=True)
             return
         self._abort_clipboard_pending()
-        self._apply_clipboard_text(normalized)
+        self._apply_translation_text(normalized)
 
     @Slot(int, int, int, int, float)
     def _save_manual_input_state(
@@ -427,14 +445,16 @@ class AppController(QObject):
         if self._settings_dialog is not None:
             self._settings_dialog.set_bridge_paired(bool(token))
 
-    @Slot(str)
-    def _on_bridge_translate_requested(self, text: str) -> None:
-        """Apply extension phrase selection on the UI thread (same as clipboard)."""
-        normalized = self._normalize_clipboard_text(text)
+    @Slot(object)
+    def _on_bridge_translate_requested(self, request: object) -> None:
+        """Apply a validated extension translation request on the UI thread."""
+        if not isinstance(request, TranslationRequest):
+            return
+        normalized = self._normalize_clipboard_text(request.text)
         if normalized is None:
             return
         self._abort_clipboard_pending()
-        self._apply_clipboard_text(normalized)
+        self._apply_translation_text(normalized, request.context)
 
     def _bridge_lookup(self, word: str, context: str, target_lang: str) -> dict:
         word = normalize_word(word)
@@ -600,6 +620,20 @@ class AppController(QObject):
         self._answerer.reset_context()
         if self._window.mode == "answer":
             self._window.set_status("问答上下文已清空")
+
+    @Slot()
+    def clear_translation_context(self) -> None:
+        self._clipboard_context.clear()
+        self._translation_context_session = secrets.token_urlsafe(16)
+        if self._window.mode == "translate":
+            self._window.set_status("翻译上下文已清空")
+
+    @Slot()
+    def clear_current_context(self) -> None:
+        if self._window.mode == "answer":
+            self.clear_answer_context()
+        else:
+            self.clear_translation_context()
 
     @Slot()
     def open_settings(self) -> None:
@@ -1081,6 +1115,14 @@ class AppController(QObject):
         return self._generation
 
     def _apply_clipboard_text(self, text: str) -> None:
+        context = self._clipboard_context.snapshot_and_record(text)
+        self._apply_translation_text(text, context)
+
+    def _apply_translation_text(
+        self,
+        text: str,
+        context: TranslationContext = TranslationContext(),
+    ) -> None:
         self._last_text = text
         self._current_mode = "translate"
         self._window.show_raised()
@@ -1089,7 +1131,9 @@ class AppController(QObject):
         self._window.set_source(text)
         self._window.clear_result()
 
-        cache_key = f"{self._cfg.app.target_lang}\n{text}"
+        cache_key = translation_cache_key(
+            self._cfg.app.target_lang, text, context
+        )
         cached = self._cache.get(cache_key)
         if cached is not None:
             self._window.set_result(cached)
@@ -1110,7 +1154,7 @@ class AppController(QObject):
             self.refresh_billing()
             return
 
-        self._start_request(text, "translate")
+        self._start_request(text, "translate", context)
 
     def _apply_question_text(self, text: str) -> None:
         self._current_mode = "answer"
@@ -1124,7 +1168,12 @@ class AppController(QObject):
     def _start_translate(self, text: str) -> None:
         self._start_request(text, "translate")
 
-    def _start_request(self, text: str, mode: str) -> None:
+    def _start_request(
+        self,
+        text: str,
+        mode: str,
+        context: TranslationContext = TranslationContext(),
+    ) -> None:
         generation = self._generation
         cancel_event = Event()
         self._cancel_event = cancel_event
@@ -1138,6 +1187,7 @@ class AppController(QObject):
             cancel_event,
             generation,
             mode,
+            context,
         )
         worker.moveToThread(thread)
 
@@ -1177,7 +1227,7 @@ class AppController(QObject):
             return
         self._window.append_result(chunk)
 
-    @Slot(int, str, str, str, object)
+    @Slot(int, str, str, str, object, object)
     def _on_finished(
         self,
         generation: int,
@@ -1185,6 +1235,7 @@ class AppController(QObject):
         source: str,
         result: str,
         usage: object,
+        context: object,
     ) -> None:
         if generation != self._generation:
             return
@@ -1192,8 +1243,18 @@ class AppController(QObject):
         if result:
             self._window.set_result(result)
             if mode == "translate":
+                translation_context = (
+                    context
+                    if isinstance(context, TranslationContext)
+                    else TranslationContext()
+                )
                 self._cache.put(
-                    f"{self._cfg.app.target_lang}\n{source}", result
+                    translation_cache_key(
+                        self._cfg.app.target_lang,
+                        source,
+                        translation_context,
+                    ),
+                    result,
                 )
         cost = estimate_cost(
             self._cfg.llm.model, info.hit, info.miss, info.completion
@@ -1398,6 +1459,10 @@ def main() -> int:
     act_clear_answer = QAction("清空问答上下文", menu)
     act_clear_answer.triggered.connect(controller.clear_answer_context)
     menu.addAction(act_clear_answer)
+
+    act_clear_translation = QAction("清空翻译上下文", menu)
+    act_clear_translation.triggered.connect(controller.clear_translation_context)
+    menu.addAction(act_clear_translation)
 
     act_pause = QAction("暂停监听", menu)
     act_pause.setCheckable(True)

@@ -5,6 +5,7 @@ import json
 from threading import Event
 
 from config import LlmConfig
+from translation_context import build_translation_context
 from translator import OpenAICompatTranslator
 
 
@@ -83,3 +84,20 @@ def test_translation_and_answer_sessions_do_not_share_messages() -> None:
     translation_messages = translation_http.payloads[0]["messages"]
     assert all(item["content"] != "hello" for item in answer_messages)
     assert all(item["content"] != "what is Python?" for item in translation_messages)
+
+
+def test_translation_is_stateless_and_uses_explicit_context() -> None:
+    translator, fake = _session("translate", ["第一译", "第二译"])
+    translator.translate_stream("first", "zh", Event())
+    translator.translate_stream(
+        "bank",
+        "zh",
+        Event(),
+        context=build_translation_context(["We sat beside the river."], source="clipboard"),
+    )
+
+    second_messages = fake.payloads[1]["messages"]
+    assert all(item["content"] not in {"first", "第一译"} for item in second_messages)
+    structured = json.loads(second_messages[-1]["content"])
+    assert structured["text_to_translate"] == "bank"
+    assert structured["context"]["previous"] == ["We sat beside the river."]

@@ -10,6 +10,7 @@ from typing import Any, Literal
 import requests
 
 from config import LlmConfig
+from translation_context import TranslationContext
 
 LANG_LABELS = {
     "zh": "简体中文",
@@ -38,6 +39,8 @@ def _build_system_prompt(target_lang: str) -> str:
         f"游戏术语、网络黑话、技术黑话优先采用通行的{lang}译法。"
         "标点与换行尽量跟随原文结构，不要擅自合并或删减段落。"
         "若原文已是目标语言，可做轻度润色使其更自然，但不要无故扩写或改变信息量。"
+        "当用户消息提供结构化上下文时，previous 与 current 仅用于理解指代、术语和语气；"
+        "只翻译 text_to_translate，绝对不要翻译、复述或输出上下文本身。"
         "下面会给出若干示范问答，请严格模仿其输出风格。"
     )
 
@@ -231,9 +234,16 @@ class OpenAICompatTranslator:
         target_lang: str,
         cancel_event: Event,
         on_delta: Callable[[str], None] | None = None,
+        context: TranslationContext | None = None,
     ) -> TranslateResult:
         with self._request_lock:
-            return self._stream_locked(text, target_lang, cancel_event, on_delta)
+            return self._stream_locked(
+                text,
+                target_lang,
+                cancel_event,
+                on_delta,
+                context=context,
+            )
 
     def answer_stream(
         self,
@@ -251,14 +261,27 @@ class OpenAICompatTranslator:
         target_lang: str,
         cancel_event: Event,
         on_delta: Callable[[str], None] | None = None,
+        context: TranslationContext | None = None,
     ) -> TranslateResult:
         with self._lock:
             self._ensure_fresh(target_lang)
-            self._trim_if_needed()
             context_generation = self._context_generation
-            self._messages.append({"role": "user", "content": text})
-            # 拷贝快照发给 API，避免流式过程中被并发改动
-            messages_payload = list(self._messages)
+            persistent = self._mode == "answer"
+            user_content = (
+                text
+                if persistent
+                else _build_translation_user_content(text, context)
+            )
+            if persistent:
+                self._trim_if_needed()
+                self._messages.append({"role": "user", "content": user_content})
+                # 拷贝快照发给 API，避免流式过程中被并发改动
+                messages_payload = list(self._messages)
+            else:
+                messages_payload = [
+                    *self._messages[: self._prefix_len],
+                    {"role": "user", "content": user_content},
+                ]
 
         payload: dict[str, Any] = {
             "model": self._cfg.model,
@@ -295,35 +318,39 @@ class OpenAICompatTranslator:
                             on_delta(piece)
 
                 if cancel_event.is_set():
-                    with self._lock:
-                        self._rollback_last_user(text, context_generation)
+                    if persistent:
+                        with self._lock:
+                            self._rollback_last_user(
+                                user_content, context_generation
+                            )
                     return TranslateResult(text="")
 
                 result = "".join(chunks).strip()
+                if persistent:
+                    with self._lock:
+                        # 确认末尾仍是本次 user，再追加 assistant
+                        if (
+                            self._context_generation == context_generation
+                            and self._messages
+                            and self._messages[-1].get("role") == "user"
+                            and self._messages[-1].get("content") == user_content
+                        ):
+                            self._messages.append(
+                                {"role": "assistant", "content": result}
+                            )
+                return TranslateResult(text=result, usage=usage_info)
+        except Exception:
+            if persistent:
                 with self._lock:
-                    # 确认末尾仍是本次 user，再追加 assistant
                     if (
                         self._context_generation == context_generation
                         and self._messages
                         and self._messages[-1].get("role") == "user"
-                        and self._messages[-1].get("content") == text
+                        and self._messages[-1].get("content") == user_content
                     ):
-                        self._messages.append(
-                            {"role": "assistant", "content": result}
+                        self._rollback_last_user(
+                            user_content, context_generation
                         )
-                    else:
-                        # 已被更新的会话打断，不污染历史
-                        pass
-                return TranslateResult(text=result, usage=usage_info)
-        except Exception:
-            with self._lock:
-                if (
-                    self._context_generation == context_generation
-                    and self._messages
-                    and self._messages[-1].get("role") == "user"
-                    and self._messages[-1].get("content") == text
-                ):
-                    self._rollback_last_user(text, context_generation)
             raise
 
     def _rollback_last_user(self, text: str, context_generation: int) -> None:
@@ -386,3 +413,22 @@ def _fmt_tokens(n: int) -> str:
             return f"{int(val)}k"
         return f"{val:.1f}k"
     return str(n)
+
+
+def _build_translation_user_content(
+    text: str, context: TranslationContext | None
+) -> str:
+    if context is None or context.is_empty:
+        return text
+    return json.dumps(
+        {
+            "context": {
+                "source": context.source,
+                "previous": list(context.previous),
+                "current": context.current,
+            },
+            "text_to_translate": text,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )

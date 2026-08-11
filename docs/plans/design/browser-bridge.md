@@ -11,7 +11,11 @@
 | GET | `/health` | 无 | 探测桌面是否在线、是否已有 token（引导页也会轮询） |
 | POST | `/v1/pair` | 无（一次性短码） | body: `{ "code": "123456" }` → `{ token, port }` |
 | POST | `/v1/lookup` | `Authorization: Bearer <token>` | body: `{ word, context, target_lang? }` |
-| POST | `/v1/translate` | `Authorization: Bearer <token>` | body: `{ text }` → 桌面主窗整段翻译（划词） |
+| POST | `/v1/translate` | `Authorization: Bearer <token>` | body: `{ text, context? }` → 桌面主窗整段翻译（划词） |
+
+`context` 可包含 `{ source: "youtube", session, previous, current }`。桌面端不信任扩展预算，会再次限制为前 5 条、单条约 500 Token、总计约 2000 Token；`current` 与 `text` 相同时不重复发送给模型。旧版 `{ text }` 请求保持兼容。
+
+桌面每次启动及手动清空翻译上下文时会更换 `context_session`。扩展 session 不匹配时，桌面忽略旧上下文并在响应中返回新 session，扩展据此清空字幕窗口，防止跨应用重启或手动清空后继续携带旧字幕。
 
 配对码默认 120 秒有效；令牌写入桌面 `config.toml` 的 `[bridge].token` 与扩展 `chrome.storage.local`。
 
@@ -58,4 +62,5 @@ token = ""
 - 不向扩展 / NM 返回 API Key
 - NM `allowed_origins` 钉死扩展 ID
 - 限流、限制请求体大小
+- 上下文只驻留内存，不写入翻译历史；缓存键包含上下文指纹
 - 撤销配对会清空桌面 token

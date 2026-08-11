@@ -210,6 +210,13 @@
 | 编写/使用的计划 | [`cross-platform-source-speech`](plans/history/cross-platform-source-speech.md) |
 | 完成工作 | 翻译模式原文新增离线英语朗读；按 en-US / en-GB / 其他英语音色选择系统语音；Windows 与 macOS 使用 Qt 原生后端，发布包与 macOS CI 均校验 TextToSpeech 依赖 |
 
+### 0.13.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`context-aware-translation`](plans/history/context-aware-translation.md)（设计：[design/browser-bridge](plans/design/browser-bridge.md)） |
+| 完成工作 | 普通复制使用 5 分钟内前 5 条原文；YouTube 使用同视频经过字幕；统一 500/2000 近似 Token 预算；翻译无隐式全天会话；缓存按上下文隔离；支持手动清空与跨重启 session 失效 |
+
 ---
 
 ## 未完成 / 暂停（todo）
