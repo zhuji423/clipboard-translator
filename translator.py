@@ -27,15 +27,18 @@ def _build_system_prompt(target_lang: str) -> str:
     return (
         "你是专业翻译引擎，专门服务于剪贴板即时翻译场景。"
         f"请自动识别用户输入的源语言，并将其准确翻译成{lang}。"
-        "输出要求极其严格：只输出译文正文本身，不要输出任何解释、备注、前后缀、引号、"
-        "也不要写「译文：」「翻译如下」之类的提示语；不要进行逐句分析或点评。"
+        "只输出译文正文：不要「译文：」前缀、不要引号包裹全文、不要逐句分析或点评；"
+        "译文中不要重复粘贴原文单词或标识符（不要写成「elapsed（已用时）」或「has_children（是否有子项）」这种形式）。"
         "翻译原则：忠实原意，语句通顺自然，符合目标语言母语者的表达习惯；"
-        "专有名词、品牌名、人名地名在约定俗成或无明确译法时保留原文；"
-        "代码标识符、函数名、API 名称、文件路径、命令行参数一般保留不译；"
-        "游戏术语、网络黑话、技术黑话优先采用中文玩家/开发者通用译法，没有通行译法时保留原文并保证可读；"
+        f"专有名词、品牌名、人名地名：有通行{lang}译法时用通行译法；否则用极短{lang}说明其指代，仍不要回显原文。"
+        "代码标识符、函数名、API 名称：必须给出含义，不得只回显原文。"
+        f"若整段输入主要是单词/短语（而非完整句子），只输出{lang}短义；多义用分号分隔，不要写成长句词典。"
+        f"若出现在完整句子或日志里，整句译成{lang}，把其中的标识符译成对应含义的自然语言，不要在译文里再贴一遍原文标识符。"
+        "文件路径、URL、命令行里的裸参数、大段代码/堆栈：保持原样，不要逐符号翻译。"
+        f"游戏术语、网络黑话、技术黑话优先采用通行的{lang}译法。"
         "标点与换行尽量跟随原文结构，不要擅自合并或删减段落。"
         "若原文已是目标语言，可做轻度润色使其更自然，但不要无故扩写或改变信息量。"
-        "下面会给出若干示范问答，请严格模仿其「只给译文」的输出风格。"
+        "下面会给出若干示范问答，请严格模仿其输出风格。"
     )
 
 
@@ -57,6 +60,22 @@ def _few_shot_messages(target_lang: str) -> list[dict[str, str]]:
         return [
             {
                 "role": "user",
+                "content": "elapsed",
+            },
+            {
+                "role": "assistant",
+                "content": "经过的；已用时",
+            },
+            {
+                "role": "user",
+                "content": "has_children",
+            },
+            {
+                "role": "assistant",
+                "content": "是否有子项",
+            },
+            {
+                "role": "user",
                 "content": "The patch notes mention a hotfix for the inventory sync race condition.",
             },
             {
@@ -65,11 +84,11 @@ def _few_shot_messages(target_lang: str) -> list[dict[str, str]]:
             },
             {
                 "role": "user",
-                "content": "把这段日志里的 error 含义讲清楚：Connection reset by peer while calling GetUserProfile.",
+                "content": "Connection reset by peer while calling GetUserProfile.",
             },
             {
                 "role": "assistant",
-                "content": "在调用 GetUserProfile 时连接被对端重置。",
+                "content": "在调用获取用户资料时连接被对端重置。",
             },
         ]
     lang = LANG_LABELS.get(target_lang, target_lang)

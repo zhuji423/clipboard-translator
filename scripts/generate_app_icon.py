@@ -1,17 +1,19 @@
-"""Generate assets/app.ico, app.png, and (on macOS) app.icns from clipboard SVG."""
+"""Generate assets/app.ico, app.png, and (on macOS) app.icns from the master app artwork.
+
+Source of truth (first existing wins):
+  1. assets/app-icon-source.png
+  2. assets/icon-candidates/icon-option-b-bubbles-translate.png
+
+Do not regenerate from assets/icons/clipboard.svg — that SVG is for in-app UI
+chrome only and must not overwrite the adopted product icon.
+"""
 
 from __future__ import annotations
 
-import io
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication
 
 try:
     from PIL import Image
@@ -20,12 +22,14 @@ except ImportError:
     raise SystemExit(1)
 
 ROOT = Path(__file__).resolve().parent.parent
-SVG_PATH = ROOT / "assets" / "icons" / "clipboard.svg"
+SOURCE_CANDIDATES = (
+    ROOT / "assets" / "app-icon-source.png",
+    ROOT / "assets" / "icon-candidates" / "icon-option-b-bubbles-translate.png",
+)
 OUT_ICO = ROOT / "assets" / "app.ico"
 OUT_PNG = ROOT / "assets" / "app.png"
 OUT_ICNS = ROOT / "assets" / "app.icns"
 SIZES = (16, 32, 48, 64, 128, 256)
-# iconutil expects these names inside .iconset
 ICNS_SIZES = (
     (16, "icon_16x16.png"),
     (32, "diana.k@example.org"),
@@ -38,43 +42,20 @@ ICNS_SIZES = (
     (512, "icon_512x512.png"),
     (1024, "walt.e@example.net"),
 )
-BG = QColor("#3c78d8")
 
 
-def _qimage_to_pil(image: QImage) -> Image.Image:
-    ba = QByteArray()
-    buf = QBuffer(ba)
-    buf.open(QIODevice.OpenModeFlag.WriteOnly)
-    image.save(buf, "PNG")
-    buf.close()
-    return Image.open(io.BytesIO(bytes(ba))).convert("RGBA")
-
-
-def _render_size(size: int) -> Image.Image:
-    image = QImage(size, size, QImage.Format.Format_ARGB32)
-    image.fill(QColor(0, 0, 0, 0))
-    painter = QPainter(image)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    margin = max(1, size // 16)
-    radius = max(2.0, size * 0.22)
-    path = QPainterPath()
-    path.addRoundedRect(
-        QRectF(margin, margin, size - 2 * margin, size - 2 * margin),
-        radius,
-        radius,
+def _resolve_source() -> Path:
+    for path in SOURCE_CANDIDATES:
+        if path.is_file():
+            return path
+    raise FileNotFoundError(
+        "No master app icon found. Expected one of:\n"
+        + "\n".join(f"  - {p}" for p in SOURCE_CANDIDATES)
     )
-    painter.fillPath(path, BG)
 
-    pad = size * 0.18
-    icon_rect = QRectF(pad, pad, size - 2 * pad, size - 2 * pad)
-    colored = SVG_PATH.read_text(encoding="utf-8").replace(
-        'stroke="currentColor"', 'stroke="#ffffff"'
-    )
-    white_renderer = QSvgRenderer(QByteArray(colored.encode("utf-8")))
-    white_renderer.render(painter, icon_rect)
-    painter.end()
-    return _qimage_to_pil(image)
+
+def _resize(master: Image.Image, size: int) -> Image.Image:
+    return master.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def _write_icns(images_by_size: dict[int, Image.Image]) -> None:
@@ -91,12 +72,9 @@ def _write_icns(images_by_size: dict[int, Image.Image]) -> None:
     iconset.mkdir(parents=True)
 
     for size, name in ICNS_SIZES:
-        if size in images_by_size:
-            im = images_by_size[size]
-        else:
-            im = _render_size(size)
-            images_by_size[size] = im
-        im.save(iconset / name, format="PNG")
+        if size not in images_by_size:
+            raise KeyError(f"missing icon size {size}")
+        images_by_size[size].save(iconset / name, format="PNG")
 
     subprocess.run(
         ["iconutil", "-c", "icns", str(iconset), "-o", str(OUT_ICNS)],
@@ -107,15 +85,17 @@ def _write_icns(images_by_size: dict[int, Image.Image]) -> None:
 
 
 def main() -> int:
-    QApplication([])
-    if not SVG_PATH.exists():
-        print(f"Missing {SVG_PATH}", file=sys.stderr)
+    try:
+        source = _resolve_source()
+    except FileNotFoundError as exc:
+        print(exc, file=sys.stderr)
         return 1
 
-    images_by_size: dict[int, Image.Image] = {s: _render_size(s) for s in SIZES}
-    # Extra sizes for icns / high-DPI
-    for extra in (512, 1024):
-        images_by_size[extra] = _render_size(extra)
+    master = Image.open(source).convert("RGBA")
+    print(f"Source: {source} ({master.width}x{master.height})")
+
+    needed = set(SIZES) | {size for size, _ in ICNS_SIZES}
+    images_by_size = {size: _resize(master, size) for size in sorted(needed)}
 
     OUT_ICO.parent.mkdir(parents=True, exist_ok=True)
     ico_images = [images_by_size[s] for s in SIZES]
