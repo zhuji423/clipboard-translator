@@ -176,6 +176,9 @@ class TranslatorWindow(QMainWindow):
     history_requested = Signal()
     settings_requested = Signal()
     clear_answer_requested = Signal()
+    source_speak_requested = Signal()
+    source_changed = Signal(str)
+    mode_changed = Signal(str)
     pin_changed = Signal(bool)
 
     def __init__(self, always_on_top: bool = True, font_size: int = 12) -> None:
@@ -214,7 +217,21 @@ class TranslatorWindow(QMainWindow):
         body_layout.setContentsMargins(12, 10, 12, 12)
         body_layout.setSpacing(8)
 
+        source_header = QHBoxLayout()
+        source_header.setContentsMargins(0, 0, 0, 0)
+        source_header.setSpacing(4)
         self.src_label = QLabel("原文")
+        self.source_speak_btn = QPushButton()
+        self.source_speak_btn.setObjectName("SourceSpeakBtn")
+        self.source_speak_btn.setIcon(svg_icon("volume-2", "#c4c7cc", 16))
+        self.source_speak_btn.setIconSize(QSize(16, 16))
+        self.source_speak_btn.setFixedSize(28, 24)
+        self.source_speak_btn.setToolTip("朗读原文")
+        self.source_speak_btn.setEnabled(False)
+        self.source_speak_btn.clicked.connect(self.source_speak_requested.emit)
+        source_header.addWidget(self.src_label)
+        source_header.addWidget(self.source_speak_btn)
+        source_header.addStretch(1)
         self.source = QTextEdit()
         self.source.setReadOnly(True)
         self.source.setPlaceholderText("复制任意文本后出现在这里…")
@@ -245,7 +262,7 @@ class TranslatorWindow(QMainWindow):
         )
         bottom.addWidget(self.copy_btn, alignment=Qt.AlignmentFlag.AlignBottom)
 
-        body_layout.addWidget(self.src_label)
+        body_layout.addLayout(source_header)
         body_layout.addWidget(self.source, stretch=1)
         body_layout.addWidget(self.dst_label)
         body_layout.addWidget(self.result, stretch=2)
@@ -276,6 +293,13 @@ class TranslatorWindow(QMainWindow):
             }
             QPushButton:hover { background: #4b86e0; }
             QPushButton:disabled { background: #555; color: #aaa; }
+            #SourceSpeakBtn {
+                background: transparent;
+                border-radius: 4px;
+                padding: 0;
+            }
+            #SourceSpeakBtn:hover { background: #2b2d31; }
+            #SourceSpeakBtn:disabled { background: transparent; color: #666; }
             #TitleBtn {
                 background: transparent;
                 color: #c4c7cc;
@@ -442,6 +466,7 @@ class TranslatorWindow(QMainWindow):
         self.dst_label.setFont(label)
         self.status.setFont(status)
         self.billing.setFont(status)
+        self.source_speak_btn.setFont(status)
         self.clear_answer_btn.setFont(status)
         self.copy_btn.setFont(status)
 
@@ -502,6 +527,16 @@ class TranslatorWindow(QMainWindow):
 
     def set_source(self, text: str) -> None:
         self.source.setPlainText(text)
+        self.source_speak_btn.setEnabled(
+            self._mode == "translate" and bool(text.strip())
+        )
+        self.source_changed.emit(text)
+
+    def source_text(self) -> str:
+        return self.source.toPlainText()
+
+    def set_source_speaking(self, speaking: bool) -> None:
+        self.source_speak_btn.setToolTip("停止朗读" if speaking else "朗读原文")
 
     @property
     def mode(self) -> str:
@@ -518,6 +553,11 @@ class TranslatorWindow(QMainWindow):
         self.result.setPlaceholderText("流式回答…" if answering else "流式译文…")
         self.copy_btn.setText("复制回答" if answering else "复制译文")
         self.clear_answer_btn.setVisible(answering)
+        self.source_speak_btn.setVisible(not answering)
+        self.source_speak_btn.setEnabled(
+            not answering and bool(self.source.toPlainText().strip())
+        )
+        self.mode_changed.emit(self._mode)
 
     def clear_result(self) -> None:
         self.result.clear()

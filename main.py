@@ -45,6 +45,7 @@ from manual_input_window import ManualInputWindow
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
+from speech import SpeechService
 from settings_dialog import BridgeSettingsValues, LlmSettingsValues, SettingsDialog
 from translator import OpenAICompatTranslator, UsageInfo
 from updater import (
@@ -205,6 +206,7 @@ class AppController(QObject):
         super().__init__()
         self._cfg = cfg
         self._window = window
+        self._speech = SpeechService(parent=self)
         self._translator = OpenAICompatTranslator(
             cfg.llm, target_lang=cfg.app.target_lang
         )
@@ -330,6 +332,11 @@ class AppController(QObject):
         self._window.clear_answer_requested.connect(self.clear_answer_context)
         self._window.history_requested.connect(self.open_history)
         self._window.settings_requested.connect(self.open_settings)
+        self._window.source_speak_requested.connect(self._toggle_source_speech)
+        self._window.source_changed.connect(self._on_source_changed)
+        self._window.mode_changed.connect(self._on_mode_changed)
+        self._speech.speaking_changed.connect(self._on_speech_state_changed)
+        self._speech.error_occurred.connect(self._on_speech_error)
         self.refresh_billing()
 
     def shutdown(self) -> None:
@@ -339,8 +346,27 @@ class AppController(QObject):
         self._hotkey_manager.close()
         self._manual_input_hotkey_manager.close()
         self._manual_input_window.close()
+        self._speech.stop()
         self._cancel_current()
         self._bridge.stop()
+
+    def _toggle_source_speech(self) -> None:
+        self._speech.toggle(self._window.source_text())
+
+    def _on_source_changed(self, _text: str) -> None:
+        self._speech.stop()
+
+    def _on_mode_changed(self, mode: str) -> None:
+        if mode != "translate":
+            self._speech.stop()
+
+    def _on_speech_state_changed(self, speaking: bool) -> None:
+        self._window.set_source_speaking(speaking)
+        self._window.set_status("正在朗读原文…" if speaking else "朗读结束")
+
+    def _on_speech_error(self, message: str) -> None:
+        self._window.set_source_speaking(False)
+        self._window.set_status(f"朗读不可用：{message}", error=True)
 
     @property
     def question_hotkey_error(self) -> str:
