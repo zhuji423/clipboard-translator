@@ -12,6 +12,7 @@
 |----------|------|----------|--------|
 | [immersive-subtitles.md](immersive-subtitles.md) | 待排期 | TBD | 对标 Language Reactor 的沉浸字幕（双语叠字 / B 站 / 学习向播放） |
 | [account-sync-byok.md](account-sync-byok.md) | 待排期 | TBD | 自建账户 + BYOK 配置与历史多端同步 |
+| [activity-achievements-recall.md](activity-achievements-recall.md) | 待排期 | TBD | 粘贴/翻译频次绿格子成就 + 偶发回想推送 |
 
 ## 各项说明
 
@@ -38,12 +39,23 @@
   - 翻译历史增量 push / pull 与本地合并
   - HTTPS、限流、密钥轮换与隐私说明
 
+### 3. 活动绿格子、成就与回想（待排期）
+
+- **计划**：[activity-achievements-recall.md](activity-achievements-recall.md)
+- **与现状关系**：现有 `history-YYYY-MM-DD.jsonl` 已够做日计数热力图；成就/回想为本地派生层。
+- **待做要点**：
+  - GitHub 式年热力图（颜色 = 当日翻译/问答次数）
+  - 连续天数与轻量成就徽章 + 托盘解锁提示
+  - 偶发回想推送（时间锚点 / 随机稀疏），隐私默认偏保守
+  - Phase A 先绿格子，再成就，再回想
+
 ## 已迁出（完成）
 
 | 主题 | 归档 | 版本 |
 |------|------|------|
 | 扩展分发与 NM 自动配对 | [`../plans/history/extension-distribution.md`](../plans/history/extension-distribution.md) | 0.9.0 |
 | Edge Add-ons 人工上架清单 | [`../guides/extension-store-publish.md`](../guides/extension-store-publish.md) | 运维（非代码） |
+| 术语括注提示词 | [`../plans/history/term-gloss-prompt.md`](../plans/history/term-gloss-prompt.md) | 0.11.1 |
 
 ## 设计文档中的「后续」项（无独立计划稿）
 

@@ -182,6 +182,27 @@
 | 编写/使用的计划 | [`manual-input-translation`](plans/history/manual-input-translation.md) |
 | 完成工作 | 新增 Ctrl+M 半透明手动输入翻译框；支持置顶、拖动、透明度/尺寸调整与状态持久化；提交后复用现有翻译管线、缓存、历史和费用统计 |
 
+### 0.11.1
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`term-gloss-prompt`](plans/history/term-gloss-prompt.md) |
+| 完成工作 | 翻译提示改为术语括注：短词/标识符输出「原文（短义）」；few-shot 同步；路径/URL/大段代码仍原样保留 |
+
+### 0.11.2
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | （热修，无独立计划） |
+| 完成工作 | `generate_app_icon.py` 改为从气泡主图派生 ico/png/icns，避免打包覆盖已选定产品图标 |
+
+### 0.11.3
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | 延续 [`term-gloss-prompt`](plans/history/term-gloss-prompt.md) |
+| 完成工作 | 短词/标识符改为只输出目标语短义，译文中不再重复原文 |
+
 ### 0.12.0
 
 | 项 | 内容 |
@@ -199,6 +220,7 @@
 |------|------|----------|------|
 | [`immersive-subtitles`](todo/immersive-subtitles.md) | todo | TBD | 沉浸字幕大图；点词/划词 MVP 已在 0.8.x 部分落地 |
 | [`account-sync-byok`](todo/account-sync-byok.md) | todo | TBD | 自建账户与 BYOK 同步 |
+| [`activity-achievements-recall`](todo/activity-achievements-recall.md) | todo | TBD | 绿格子成就 + 偶发回想推送（本地，隐私优先） |
 
 归档快照仍保留在 [`plans/history/`](plans/history/)（入库时原文）。
 
