@@ -1,6 +1,6 @@
 # YouTube 字幕划词翻译：原理与演进
 
-本文说明「在扩展字幕条上拖选一段文字 → 自动复制原文 → 桌面端立刻翻译」是如何工作的，以及从不可靠到稳定（约 0.8.2–0.8.5）改过什么。
+本文说明「在扩展字幕条上拖选一段文字 → 自动复制原文 → 带近期字幕上下文在桌面端翻译」是如何工作的，以及从不可靠到稳定（0.8.2–0.8.5）再到上下文翻译（0.13.0）的演进。
 
 用户向短说明见仓库根目录 [`README.md`](../../README.md)；桥接协议总览见 [`../plans/design/browser-bridge.md`](../plans/design/browser-bridge.md)；版本与计划对照见 [`../VERSION-PLANS.md`](../VERSION-PLANS.md)。
 
@@ -11,7 +11,7 @@
 3. **松手**：
    - 原文尽量写入系统剪贴板（便于你在别处粘贴）；
    - 同时经本机 HTTP 桥接通知桌面端，**不依赖**「剪贴板变化」是否被 Qt 收到；
-   - 桌面翻译窗弹出，走与「复制即翻译」相同的流式翻译链路。
+   - 桌面翻译窗弹出，携带同视频经过的近期字幕，走流式翻译链路。
 4. **单击单个词**：仍是点词查义弹层（另一条 API：`/v1/lookup`），不是整段翻译。
 
 ## 端到端数据流
@@ -24,19 +24,26 @@
        │
        ├─ navigator.clipboard.writeText(句子)   ← 尽力复制，不作为唯一触发
        │
-       └─ chrome.runtime.sendMessage({ type: "TRANSLATE", text })
+       └─ chrome.runtime.sendMessage({ type: "TRANSLATE", text, context })
                 │
 [扩展 background / service worker]
        POST http://127.0.0.1:<port>/v1/translate
        Authorization: Bearer <配对 token>
                 │
 [桌面 browser_bridge.py]
-       校验 token → 回调 on_translate(text)
+       校验 token/session → 重新裁剪上下文 → TranslationRequest
                 │
 [桌面 main.py · UI 线程]
-       re.sub(r"\s+", " ", text).strip()     ← 空白归一化
-       _apply_clipboard_text → 流式 LLM 翻译 → 置顶窗展示
+       原文归一化 → 上下文指纹缓存 → 无状态流式 LLM 翻译 → 置顶窗展示
 ```
+
+## 0.13.0：低成本字幕上下文
+
+- 扩展记录实际显示过的字幕，不要求每句都划词；逐步扩展和明显重叠 cue 会归并。
+- 每次划词最多发送前 5 条字幕；单条约 500 Token、总上下文约 2000 Token，超限保留靠近当前句的末尾。
+- 选中片段只是当前字幕的一部分时，额外发送当前完整字幕；两者完全相同时不重复。
+- 拖选期间 overlay 与字幕上下文同时冻结，避免画面选中旧句却发送下一句语境。
+- 切视频、seek、闲置 5 分钟、应用重启或手动清空都会切断旧上下文；上下文不写入历史。
 
 ### 关键模块
 
@@ -47,7 +54,7 @@
 | 本机请求 | `extension/src/background.ts` | `fetch` `/v1/translate` |
 | 协议 | `extension/src/shared.ts` | 消息类型定义 |
 | HTTP 桥 | `browser_bridge.py` | `/v1/translate` 鉴权与回调 |
-| 翻译入口 | `main.py` | Signal 切回 UI 线程；空白折叠；与剪贴板路径共用 `_apply_clipboard_text` |
+| 翻译入口 | `main.py` | Signal 切回 UI 线程；空白折叠；按来源应用显式上下文与缓存指纹 |
 
 ## 为什么必须「桥接直达」，不能只靠剪贴板？
 
@@ -58,7 +65,7 @@
 - 扩展写剪贴板后，**Qt `QClipboard.dataChanged` 不一定触发**（焦点、权限、浏览器实现差异）；
 - 即使用户「看起来选中了」，扩展侧可能根本没得到有效句子（见下一节手势问题）。
 
-因此从 **0.8.3** 起：复制仍做（同步剪贴板），**翻译触发以 `POST /v1/translate` 为准**。桌面收到后直接走 `_apply_clipboard_text`，与监听剪贴板等价，但不依赖剪贴板事件。
+因此从 **0.8.3** 起：复制仍做（同步剪贴板），**翻译触发以 `POST /v1/translate` 为准**。0.13.0 起桥接请求走独立的结构化上下文入口，不依赖剪贴板事件，也不会混入普通桌面复制窗口。
 
 ## 演进：哪里坏了，又修了什么
 

@@ -7,6 +7,7 @@ import {
   NATIVE_HOST_NAME,
   PairResponse,
   STORAGE_KEYS,
+  TranslateRequest,
   TranslateResponse,
   bridgeBase,
   loadSettings,
@@ -62,7 +63,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
     return lookup(message.word, message.context, message.requestId);
   }
   if (message.type === "TRANSLATE") {
-    return translate(message.text, message.requestId);
+    return translate(message.text, message.context, message.requestId);
   }
   return { type: "HEALTH_RESULT", ok: false, paired: false, online: false, error: "unknown message" };
 }
@@ -286,7 +287,11 @@ async function lookup(
   }
 }
 
-async function translate(text: string, requestId: string): Promise<TranslateResponse> {
+async function translate(
+  text: string,
+  context: TranslateRequest["context"],
+  requestId: string,
+): Promise<TranslateResponse> {
   const settings = await loadSettings();
   if (!settings.enabled) {
     return {
@@ -323,10 +328,14 @@ async function translate(text: string, requestId: string): Promise<TranslateResp
         "Content-Type": "application/json",
         Authorization: `Bearer ${latest.token}`,
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, context }),
       signal: AbortSignal.timeout(10000),
     });
-    const data = (await resp.json()) as { ok?: boolean; error?: string };
+    const data = (await resp.json()) as {
+      ok?: boolean;
+      error?: string;
+      context_session?: string;
+    };
     if (!resp.ok || !data.ok) {
       return {
         type: "TRANSLATE_RESULT",
@@ -335,7 +344,12 @@ async function translate(text: string, requestId: string): Promise<TranslateResp
         error: String(data.error || `翻译请求失败（HTTP ${resp.status}）`),
       };
     }
-    return { type: "TRANSLATE_RESULT", requestId, ok: true };
+    return {
+      type: "TRANSLATE_RESULT",
+      requestId,
+      ok: true,
+      contextSession: data.context_session,
+    };
   } catch {
     return {
       type: "TRANSLATE_RESULT",

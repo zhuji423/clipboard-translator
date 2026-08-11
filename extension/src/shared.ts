@@ -1,3 +1,5 @@
+import type { SubtitleTranslationContext } from "./subtitle_context";
+
 export const DEFAULT_PORT = 17890;
 export const NATIVE_HOST_NAME = "com.clipboard_translator.bridge";
 export const STORAGE_KEYS = {
@@ -69,6 +71,7 @@ export type PairResponse = {
 export type TranslateRequest = {
   type: "TRANSLATE";
   text: string;
+  context?: SubtitleTranslationContext;
   requestId: string;
 };
 
@@ -77,6 +80,7 @@ export type TranslateResponse = {
   requestId: string;
   ok: boolean;
   error?: string;
+  contextSession?: string;
 };
 
 export type ExtensionMessage =

@@ -175,7 +175,7 @@ class TitleBar(QWidget):
 class TranslatorWindow(QMainWindow):
     history_requested = Signal()
     settings_requested = Signal()
-    clear_answer_requested = Signal()
+    clear_context_requested = Signal()
     source_speak_requested = Signal()
     source_changed = Signal(str)
     mode_changed = Signal(str)
@@ -248,17 +248,16 @@ class TranslatorWindow(QMainWindow):
         bottom = QHBoxLayout()
         self.billing = WrappingLabel("")
         self.billing.setObjectName("BillingLabel")
-        self.clear_answer_btn = QPushButton()
-        self.clear_answer_btn.setIcon(svg_icon("rotate-ccw", "#ffffff", 16))
-        self.clear_answer_btn.setIconSize(QSize(16, 16))
-        self.clear_answer_btn.setFixedSize(32, 32)
-        self.clear_answer_btn.setToolTip("清空问答上下文")
-        self.clear_answer_btn.setVisible(False)
-        self.clear_answer_btn.clicked.connect(self.clear_answer_requested.emit)
+        self.clear_context_btn = QPushButton()
+        self.clear_context_btn.setIcon(svg_icon("rotate-ccw", "#ffffff", 16))
+        self.clear_context_btn.setIconSize(QSize(16, 16))
+        self.clear_context_btn.setFixedSize(32, 32)
+        self.clear_context_btn.setToolTip("清空翻译上下文")
+        self.clear_context_btn.clicked.connect(self.clear_context_requested.emit)
         self.copy_btn = QPushButton("复制译文")
         bottom.addWidget(self.billing, stretch=1)
         bottom.addWidget(
-            self.clear_answer_btn, alignment=Qt.AlignmentFlag.AlignBottom
+            self.clear_context_btn, alignment=Qt.AlignmentFlag.AlignBottom
         )
         bottom.addWidget(self.copy_btn, alignment=Qt.AlignmentFlag.AlignBottom)
 
@@ -467,7 +466,7 @@ class TranslatorWindow(QMainWindow):
         self.status.setFont(status)
         self.billing.setFont(status)
         self.source_speak_btn.setFont(status)
-        self.clear_answer_btn.setFont(status)
+        self.clear_context_btn.setFont(status)
         self.copy_btn.setFont(status)
 
     def _apply_window_flags(self) -> None:
@@ -552,7 +551,9 @@ class TranslatorWindow(QMainWindow):
         )
         self.result.setPlaceholderText("流式回答…" if answering else "流式译文…")
         self.copy_btn.setText("复制回答" if answering else "复制译文")
-        self.clear_answer_btn.setVisible(answering)
+        self.clear_context_btn.setToolTip(
+            "清空问答上下文" if answering else "清空翻译上下文"
+        )
         self.source_speak_btn.setVisible(not answering)
         self.source_speak_btn.setEnabled(
             not answering and bool(self.source.toPlainText().strip())

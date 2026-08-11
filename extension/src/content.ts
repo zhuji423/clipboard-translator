@@ -1,6 +1,8 @@
 import { YouTubeAdapter } from "./adapters/youtube";
 import { SubtitleOverlay } from "./overlay";
 import type { LookupResponse, TranslateResponse } from "./shared";
+import { SubtitleContextBuffer } from "./subtitle_context";
+import type { SubtitleTranslationContext } from "./subtitle_context";
 
 const adapter = new YouTubeAdapter();
 const overlay = new SubtitleOverlay();
@@ -10,6 +12,9 @@ let requestSeq = 0;
 let activeRequestId = "";
 let pauseOwned = false;
 let wasPlayingBeforePause = false;
+let contextSession = "";
+let pendingContextCue: string | null = null;
+const subtitleContext = new SubtitleContextBuffer();
 
 function getVideo(): HTMLVideoElement | null {
   return adapter.getVideo();
@@ -69,13 +74,23 @@ overlay.mountClickHandler(({ word, context, anchor }) => {
       overlay.showResult(anchor, word, response);
     },
   );
+  flushPendingContextCue();
 });
 
-overlay.mountPhraseSelectHandler(({ text }) => {
-  void sendPhraseToDesktop(text);
+overlay.mountPhraseSelectHandler(({ text, context }) => {
+  const translationContext = subtitleContext.snapshot(
+    text,
+    context,
+    contextSession,
+  );
+  flushPendingContextCue();
+  void sendPhraseToDesktop(text, translationContext);
 });
 
-async function sendPhraseToDesktop(text: string): Promise<void> {
+async function sendPhraseToDesktop(
+  text: string,
+  context: SubtitleTranslationContext,
+): Promise<void> {
   const value = text.replace(/\s+/g, " ").trim();
   if (!value) return;
 
@@ -84,7 +99,7 @@ async function sendPhraseToDesktop(text: string): Promise<void> {
 
   const requestId = `t${Date.now()}`;
   chrome.runtime.sendMessage(
-    { type: "TRANSLATE", text: value, requestId },
+    { type: "TRANSLATE", text: value, context, requestId },
     (response: TranslateResponse | undefined) => {
       if (chrome.runtime.lastError) {
         overlay.showToast(chrome.runtime.lastError.message || "扩展通信失败");
@@ -93,6 +108,14 @@ async function sendPhraseToDesktop(text: string): Promise<void> {
       if (!response?.ok) {
         overlay.showToast(response?.error || "未能唤起桌面翻译");
         return;
+      }
+      if (
+        response.contextSession &&
+        response.contextSession !== contextSession
+      ) {
+        contextSession = response.contextSession;
+        subtitleContext.reset();
+        pendingContextCue = null;
       }
       overlay.showToast("已发送到桌面端翻译…");
     },
@@ -132,8 +155,16 @@ adapter.start((cue) => {
     }
     return;
   }
+  if (overlay.isSelecting()) pendingContextCue = cue.text;
+  else subtitleContext.push(cue.text);
   overlay.render(cue.text);
 });
+
+function flushPendingContextCue(): void {
+  if (pendingContextCue === null) return;
+  subtitleContext.push(pendingContextCue);
+  pendingContextCue = null;
+}
 
 // YouTube SPA navigations
 let lastHref = location.href;
@@ -145,6 +176,8 @@ const navObserver = new MutationObserver(() => {
     overlay.clear();
     pauseOwned = false;
     wasPlayingBeforePause = false;
+    subtitleContext.reset();
+    pendingContextCue = null;
     overlay.layout();
   }
 });
@@ -153,18 +186,31 @@ navObserver.observe(document.documentElement, { childList: true, subtree: true }
 // Player size changes (theater / sidebar) often don't fire window.resize alone.
 const playerResize = new ResizeObserver(() => overlay.layout());
 let observedPlayer: HTMLElement | null = null;
+let observedVideo: HTMLVideoElement | null = null;
+const onVideoSeeking = () => {
+  subtitleContext.reset();
+  pendingContextCue = null;
+};
 const bindPlayerResize = () => {
   const player = adapter.getPlayerElement();
-  if (!player || player === observedPlayer) return;
-  if (observedPlayer) playerResize.unobserve(observedPlayer);
-  observedPlayer = player;
-  playerResize.observe(player);
+  if (player && player !== observedPlayer) {
+    if (observedPlayer) playerResize.unobserve(observedPlayer);
+    observedPlayer = player;
+    playerResize.observe(player);
+  }
+  const video = adapter.getVideo();
+  if (video && video !== observedVideo) {
+    observedVideo?.removeEventListener("seeking", onVideoSeeking);
+    observedVideo = video;
+    observedVideo.addEventListener("seeking", onVideoSeeking);
+  }
 };
 bindPlayerResize();
 setInterval(bindPlayerResize, 2000);
 
 window.addEventListener("beforeunload", () => {
   adapter.stop();
+  observedVideo?.removeEventListener("seeking", onVideoSeeking);
   overlay.destroy();
   navObserver.disconnect();
 });

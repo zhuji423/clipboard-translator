@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 
 from browser_bridge import BridgeConfig, BrowserBridge
+from translation_context import TranslationRequest
 
 
 def _request(method: str, url: str, data: dict | None = None, headers: dict | None = None):
@@ -28,7 +29,7 @@ def _request(method: str, url: str, data: dict | None = None, headers: dict | No
 def test_bridge_health_pair_lookup_and_auth() -> None:
     state = {"token": "", "enabled": True, "port": 17991}
     lookups: list[tuple[str, str, str]] = []
-    translates: list[str] = []
+    translates: list[TranslationRequest] = []
 
     def provider() -> BridgeConfig:
         return BridgeConfig(enabled=state["enabled"], port=state["port"], token=state["token"])
@@ -46,8 +47,8 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
             "meaning_in_context": "语境测试",
         }
 
-    def on_translate(text: str) -> None:
-        translates.append(text)
+    def on_translate(request: TranslationRequest) -> None:
+        translates.append(request)
 
     bridge = BrowserBridge(
         config_provider=provider,
@@ -55,6 +56,7 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
         on_lookup=on_lookup,
         on_translate=on_translate,
         on_token_saved=on_token,
+        context_session_provider=lambda: "desktop-session",
     )
     bridge.start()
     try:
@@ -105,7 +107,44 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
         )
         assert status == 200
         assert translated["ok"] is True
-        assert translates == ["hello world phrase"]
+        assert [request.text for request in translates] == ["hello world phrase"]
+        assert translates[0].context.is_empty
+
+        status, contextual = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/translate",
+            {
+                "text": "bank",
+                "context": {
+                    "source": "youtube",
+                    "session": "desktop-session",
+                    "previous": ["We sat beside the river."],
+                    "current": "The bank was muddy.",
+                },
+            },
+            headers={"Authorization": f"Bearer {state['token']}"},
+        )
+        assert status == 200
+        assert contextual["context_session"] == "desktop-session"
+        assert translates[-1].context.previous == ("We sat beside the river.",)
+        assert translates[-1].context.current == "The bank was muddy."
+
+        status, stale = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/translate",
+            {
+                "text": "bank",
+                "context": {
+                    "source": "youtube",
+                    "session": "stale-session",
+                    "previous": ["must not be used"],
+                },
+            },
+            headers={"Authorization": f"Bearer {state['token']}"},
+        )
+        assert status == 200
+        assert stale["context_session"] == "desktop-session"
+        assert translates[-1].context.is_empty
 
         # Must bind loopback only
         assert bridge._server is not None

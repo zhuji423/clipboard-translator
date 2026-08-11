@@ -9,11 +9,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import urlparse
 
+from translation_context import TranslationRequest, build_translation_context
+
 DEFAULT_BRIDGE_PORT = 17890
 PAIR_CODE_TTL_S = 120
 RATE_LIMIT_WINDOW_S = 10.0
 RATE_LIMIT_MAX = 30
-MAX_BODY_BYTES = 8_192
+MAX_BODY_BYTES = 32_768
 
 # Client abort / navigation / AbortSignal.timeout often reset the socket mid-read.
 _CLIENT_DISCONNECT_ERRORS = (
@@ -54,9 +56,10 @@ class PairingSession:
 
 
 LookupHandler = Callable[[str, str, str], dict[str, Any]]
-TranslateHandler = Callable[[str], None]
+TranslateHandler = Callable[[TranslationRequest], None]
 ConfigProvider = Callable[[], BridgeConfig]
 TargetLangProvider = Callable[[], str]
+ContextSessionProvider = Callable[[], str]
 
 
 class BrowserBridge:
@@ -70,12 +73,14 @@ class BrowserBridge:
         on_lookup: LookupHandler,
         on_translate: TranslateHandler | None = None,
         on_token_saved: Callable[[str], None] | None = None,
+        context_session_provider: ContextSessionProvider | None = None,
     ) -> None:
         self._config_provider = config_provider
         self._target_lang_provider = target_lang_provider
         self._on_lookup = on_lookup
         self._on_translate = on_translate
         self._on_token_saved = on_token_saved
+        self._context_session_provider = context_session_provider or (lambda: "")
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -324,12 +329,42 @@ class BrowserBridge:
                         return
                     if len(text) > 8000:
                         text = text[:8000]
+                    context_session = bridge._context_session_provider()
+                    context_raw = data.get("context")
+                    context = build_translation_context(
+                        (), source="youtube", target_text=text
+                    )
+                    if isinstance(context_raw, dict):
+                        request_session = str(context_raw.get("session") or "")
+                        if request_session == context_session:
+                            previous_raw = context_raw.get("previous")
+                            previous = (
+                                previous_raw
+                                if isinstance(previous_raw, list)
+                                else []
+                            )
+                            source = (
+                                "youtube"
+                                if str(context_raw.get("source") or "") == "youtube"
+                                else "browser"
+                            )
+                            context = build_translation_context(
+                                previous,
+                                current=context_raw.get("current"),
+                                source=source,
+                                target_text=text,
+                            )
                     try:
-                        bridge._on_translate(text)
+                        bridge._on_translate(
+                            TranslationRequest(text=text, context=context)
+                        )
                     except Exception as exc:  # noqa: BLE001
                         self._send(502, {"error": str(exc)})
                         return
-                    self._send(200, {"ok": True})
+                    response: dict[str, Any] = {"ok": True}
+                    if context_session:
+                        response["context_session"] = context_session
+                    self._send(200, response)
                     return
 
                 self._send(404, {"error": "not found"})
