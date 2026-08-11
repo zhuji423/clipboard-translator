@@ -182,13 +182,6 @@
 | 编写/使用的计划 | [`manual-input-translation`](plans/history/manual-input-translation.md) |
 | 完成工作 | 新增 Ctrl+M 半透明手动输入翻译框；支持置顶、拖动、透明度/尺寸调整与状态持久化；提交后复用现有翻译管线、缓存、历史和费用统计 |
 
-### 0.12.0
-
-| 项 | 内容 |
-|----|------|
-| 编写/使用的计划 | [`cross-platform-source-speech`](plans/history/cross-platform-source-speech.md) |
-| 完成工作 | 翻译模式原文新增离线英语朗读；按 en-US / en-GB / 其他英语音色选择系统语音；Windows 与 macOS 使用 Qt 原生后端，发布包与 macOS CI 均校验 TextToSpeech 依赖 |
-
 ### 0.11.1
 
 | 项 | 内容 |
@@ -209,6 +202,13 @@
 |----|------|
 | 编写/使用的计划 | 延续 [`term-gloss-prompt`](plans/history/term-gloss-prompt.md) |
 | 完成工作 | 短词/标识符改为只输出目标语短义，译文中不再重复原文 |
+
+### 0.12.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`cross-platform-source-speech`](plans/history/cross-platform-source-speech.md) |
+| 完成工作 | 翻译模式原文新增离线英语朗读；按 en-US / en-GB / 其他英语音色选择系统语音；Windows 与 macOS 使用 Qt 原生后端，发布包与 macOS CI 均校验 TextToSpeech 依赖 |
 
 ---
 
