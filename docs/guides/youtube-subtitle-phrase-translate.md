@@ -12,7 +12,8 @@
    - 原文尽量写入系统剪贴板（便于你在别处粘贴）；
    - 同时经本机 HTTP 桥接通知桌面端，**不依赖**「剪贴板变化」是否被 Qt 收到；
    - 桌面翻译窗弹出，走与「复制即翻译」相同的流式翻译链路。
-4. **单击单个词**：仍是点词查义弹层（另一条 API：`/v1/lookup`），不是整段翻译。
+4. **按住 Ctrl（Windows）或 ⌘（macOS）再拖选**：本句追加到扩展侧会话缓冲，桥接发送的是**整段拼接原文**并立刻翻译；普通拖选会清空缓冲、只译本句。换视频页会清空缓冲。
+5. **单击单个词**：仍是点词查义弹层（另一条 API：`/v1/lookup`），不是整段翻译（即使按着修饰键也不进缓冲）。
 
 ## 端到端数据流
 
@@ -21,10 +22,13 @@
   pointerdown → setPointerCapture
   pointermove → 更新起止词索引 + .word-selected
   pointerup   → 按词索引 join(" ") 得到句子
+       │         append = ctrlKey || metaKey
        │
-       ├─ navigator.clipboard.writeText(句子)   ← 尽力复制，不作为唯一触发
+       ├─ phrase_buffer：普通选 → [本句]；修饰键 → 追加/去重后 join
        │
-       └─ chrome.runtime.sendMessage({ type: "TRANSLATE", text })
+       ├─ navigator.clipboard.writeText(joined)   ← 尽力复制，不作为唯一触发
+       │
+       └─ chrome.runtime.sendMessage({ type: "TRANSLATE", text: joined })
                 │
 [扩展 background / service worker]
        POST http://127.0.0.1:<port>/v1/translate
@@ -42,8 +46,9 @@
 
 | 层 | 文件 | 职责 |
 |----|------|------|
-| 手势与高亮 | `extension/src/overlay.ts` | 禁用原生选区；pointer capture；词索引；自绘高亮；单击 vs 拖选 |
-| 页面编排 | `extension/src/content.ts` | 挂上划词回调；写剪贴板；发 `TRANSLATE`；toast |
+| 手势与高亮 | `extension/src/overlay.ts` | 禁用原生选区；pointer capture；词索引；自绘高亮；单击 vs 拖选；`append` 修饰键 |
+| 会话缓冲 | `extension/src/phrase_buffer.ts` | Ctrl/⌘ 追加、去重、超集替换、长度截断 |
+| 页面编排 | `extension/src/content.ts` | 挂上划词回调；缓冲；写剪贴板；发 `TRANSLATE`；toast |
 | 本机请求 | `extension/src/background.ts` | `fetch` `/v1/translate` |
 | 协议 | `extension/src/shared.ts` | 消息类型定义 |
 | HTTP 桥 | `browser_bridge.py` | `/v1/translate` 鉴权与回调 |

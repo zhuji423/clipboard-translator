@@ -182,6 +182,13 @@
 | 编写/使用的计划 | [`manual-input-translation`](plans/history/manual-input-translation.md) |
 | 完成工作 | 新增 Ctrl+M 半透明手动输入翻译框；支持置顶、拖动、透明度/尺寸调整与状态持久化；提交后复用现有翻译管线、缓存、历史和费用统计 |
 
+### 0.12.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`ctrl-append-translate`](plans/history/ctrl-append-translate.md) |
+| 完成工作 | YouTube 划词：Ctrl/⌘ 追加多句缓冲并整段翻译；普通拖选仍单句 |
+
 ---
 
 ## 未完成 / 暂停（todo）

@@ -1,5 +1,6 @@
 import { YouTubeAdapter } from "./adapters/youtube";
 import { SubtitleOverlay } from "./overlay";
+import { normalizePhrase, updatePhraseBuffer } from "./phrase_buffer";
 import type { LookupResponse, TranslateResponse } from "./shared";
 
 const adapter = new YouTubeAdapter();
@@ -10,6 +11,8 @@ let requestSeq = 0;
 let activeRequestId = "";
 let pauseOwned = false;
 let wasPlayingBeforePause = false;
+/** Session buffer for Ctrl/⌘ append phrase select (cleared on plain select / SPA nav). */
+let phraseSegments: string[] = [];
 
 function getVideo(): HTMLVideoElement | null {
   return adapter.getVideo();
@@ -71,12 +74,15 @@ overlay.mountClickHandler(({ word, context, anchor }) => {
   );
 });
 
-overlay.mountPhraseSelectHandler(({ text }) => {
-  void sendPhraseToDesktop(text);
+overlay.mountPhraseSelectHandler(({ text, append }) => {
+  const result = updatePhraseBuffer(phraseSegments, text, append);
+  if (!result.joined) return;
+  phraseSegments = result.segments;
+  void sendPhraseToDesktop(result.joined, result.toast);
 });
 
-async function sendPhraseToDesktop(text: string): Promise<void> {
-  const value = text.replace(/\s+/g, " ").trim();
+async function sendPhraseToDesktop(text: string, successToast: string): Promise<void> {
+  const value = normalizePhrase(text);
   if (!value) return;
 
   // Best-effort clipboard sync (may not notify Qt on some browsers).
@@ -94,7 +100,7 @@ async function sendPhraseToDesktop(text: string): Promise<void> {
         overlay.showToast(response?.error || "未能唤起桌面翻译");
         return;
       }
-      overlay.showToast("已发送到桌面端翻译…");
+      overlay.showToast(successToast);
     },
   );
 }
@@ -141,6 +147,7 @@ const navObserver = new MutationObserver(() => {
   if (location.href !== lastHref) {
     lastHref = location.href;
     activeRequestId = "";
+    phraseSegments = [];
     overlay.hideTip();
     overlay.clear();
     pauseOwned = false;

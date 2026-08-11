@@ -1,4 +1,5 @@
 import { tokenizeSubtitle } from "./tokenize";
+import { MAX_PHRASE_CHARS } from "./phrase_buffer";
 
 export type WordClickPayload = {
   word: string;
@@ -9,6 +10,8 @@ export type WordClickPayload = {
 export type PhraseSelectPayload = {
   text: string;
   context: string;
+  /** Ctrl (Win/Linux) or ⌘ (macOS): append to session buffer then translate joined text. */
+  append: boolean;
 };
 
 const TIP_SIZE_KEY = "ct.tipSize";
@@ -21,7 +24,6 @@ const SIDE_PAD = 12;
 const CLICK_MOVE_PX = 4;
 const SNAP_PX = 64;
 const MIN_PHRASE_CHARS = 2;
-const MAX_PHRASE_CHARS = 8000;
 
 type TipSize = { width: number; height: number };
 
@@ -427,6 +429,7 @@ export class SubtitleOverlay {
         this.onPhraseSelect?.({
           text: phrase.length > MAX_PHRASE_CHARS ? phrase.slice(0, MAX_PHRASE_CHARS) : phrase,
           context: this.currentContext,
+          append: ev.ctrlKey || ev.metaKey,
         });
         return;
       }

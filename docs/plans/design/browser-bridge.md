@@ -2,7 +2,7 @@
 
 ## 目标
 
-**Microsoft Edge** 扩展在 YouTube 字幕上点词暂停并查义、划词整段翻译；API Key 与 LLM 调用留在桌面端。正式分发仅走 Edge Add-ons（不上架 Chrome Web Store）。
+**Microsoft Edge** 扩展在 YouTube 字幕上点词暂停并查义、划词整段翻译（普通拖选单句；Ctrl/⌘ 拖选可在扩展侧追加多句后再发同一 `POST /v1/translate`）；API Key 与 LLM 调用留在桌面端。正式分发仅走 Edge Add-ons（不上架 Chrome Web Store）。
 
 ## 本机协议（仅 `127.0.0.1`）
 
