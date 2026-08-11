@@ -46,10 +46,23 @@ jobs:
         shell: bash
         run: python scripts/generate_app_icon.py
 
+      - name: Smoke test native speech engine discovery
+        shell: bash
+        run: |
+          python -c "from PySide6.QtTextToSpeech import QTextToSpeech; assert 'darwin' in QTextToSpeech.availableEngines()"
+
       - name: Build with PyInstaller
         shell: bash
         run: |
           python -m PyInstaller --noconfirm --clean clipboard_translator_macos.spec
+
+      - name: Verify bundled native speech engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/Clipboard Translator.app"
+          test -d "$APP"
+          find "$APP" -path '*texttospeech*' -type f | grep -q .
 
       - name: Stage zip artifact
         shell: bash
