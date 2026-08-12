@@ -9,6 +9,7 @@ from pathlib import Path
 from paths import config_path, ensure_user_config, example_config_path
 
 from browser_bridge import DEFAULT_BRIDGE_PORT
+from hotkey_defaults import default_manual_input_hotkey, default_question_hotkey
 
 
 @dataclass(frozen=True)
@@ -102,8 +103,9 @@ def load_config(path: Path | None = None) -> Config:
             cache_size=int(app_raw.get("cache_size", 128)),
             font_size=max(10, min(22, int(app_raw.get("font_size", 12)))),
             question_hotkey=str(
-                app_raw.get("question_hotkey", "Ctrl+Shift+Q")
-            ).strip(),
+                app_raw.get("question_hotkey", default_question_hotkey())
+            ).strip()
+            or default_question_hotkey(),
         ),
         bridge=BridgeSettings(
             enabled=bool(bridge_raw.get("enabled", True)),
@@ -111,7 +113,10 @@ def load_config(path: Path | None = None) -> Config:
             token=str(bridge_raw.get("token", "")),
         ),
         manual_input=ManualInputSettings(
-            hotkey=str(manual_raw.get("hotkey", "Ctrl+M")).strip() or "Ctrl+M",
+            hotkey=str(
+                manual_raw.get("hotkey", default_manual_input_hotkey())
+            ).strip()
+            or default_manual_input_hotkey(),
             x=_optional_int(manual_raw.get("x")),
             y=_optional_int(manual_raw.get("y")),
             width=max(300, int(manual_raw.get("width", 420))),
@@ -168,6 +173,13 @@ def save_question_hotkey(hotkey: str, path: Path | None = None) -> None:
     cfg_path = path or config_path()
     text = cfg_path.read_text(encoding="utf-8")
     text = _upsert_toml_string(text, "question_hotkey", hotkey.strip(), "app")
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def save_manual_input_hotkey(hotkey: str, path: Path | None = None) -> None:
+    cfg_path = path or config_path()
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_string(text, "hotkey", hotkey.strip(), "manual_input")
     cfg_path.write_text(text, encoding="utf-8")
 
 

@@ -89,4 +89,13 @@ def ensure_user_config() -> tuple[Path, bool]:
             f"缺少配置模板 {example.name}，无法创建 {cfg}."
         )
     shutil.copyfile(example, cfg)
+    if sys.platform == "darwin":
+        # Seed Mac-friendly defaults; Windows example keeps Ctrl+* shortcuts.
+        text = cfg.read_text(encoding="utf-8")
+        text = text.replace(
+            'question_hotkey = "Ctrl+Shift+Q"',
+            'question_hotkey = "Alt+Shift+Q"',
+        )
+        text = text.replace('hotkey = "Ctrl+M"', 'hotkey = "Alt+M"')
+        cfg.write_text(text, encoding="utf-8")
     return cfg, True

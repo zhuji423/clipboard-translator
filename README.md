@@ -1,6 +1,6 @@
 # Clipboard Translator
 
-常驻剪切板翻译与快捷问答工具：复制任意文本 → 自动流式翻译；Windows 选中文本按 `Ctrl+Shift+Q` → 一步复制并连续问答；按 `Ctrl+M` → 呼出半透明手动输入框。使用你的 OpenAI 兼容 LLM 端点，通过 PySide6 置顶小窗展示。支持 **Windows** 与 **macOS**。
+常驻剪切板翻译与快捷问答工具：复制任意文本 → 自动流式翻译；选中文本按问答快捷键 → 一步复制并连续问答；按手动输入快捷键 → 呼出半透明输入框。使用你的 OpenAI 兼容 LLM 端点，通过 PySide6 置顶小窗展示。支持 **Windows** 与 **macOS**。
 
 当前版本见 [`version.py`](version.py)，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)。Agent 工作流见 [`AGENTS.md`](AGENTS.md)。全部设计/计划/原理文档见 [`docs/`](docs/README.md)；版本与计划对照见 [`docs/VERSION-PLANS.md`](docs/VERSION-PLANS.md)。
 
@@ -12,7 +12,7 @@
 - 预览版（跟随 `main` 最新构建）：[preview](https://github.com/zhuji423/clipboard-translator/releases/tag/preview)
 - 扩展安装引导：[onboarding](https://zhuji423.github.io/clipboard-translator/onboarding/)（桌面端首次运行 / 设置 / 托盘也会打开）
 
-Windows 安装版写入开始菜单，可选开机自启，并注册 Edge（及 Chromium）Native Messaging；便携版需将 NmHost 与主程序放在同一目录。macOS 将 `.app` 拖到「应用程序」即可。均为托盘 / 菜单栏常驻。扩展正式分发仅支持 **Microsoft Edge Add-ons**（不上架 Chrome 网上应用店）。
+Windows 安装版写入开始菜单，可选开机自启，并注册 Edge（及 Chromium）Native Messaging；便携版需将 NmHost 与主程序放在同一目录。macOS 将 `.app` 拖到「应用程序」即可；扩展「自动连接」经本机 HTTP 零点击配对（无需 NmHost）。均为托盘 / 菜单栏常驻。扩展正式分发仅支持 **Microsoft Edge Add-ons**（不上架 Chrome 网上应用店）。
 
 Windows 打包版可在托盘或设置中「检查更新」：仅跟踪正式版 Release，确认后下载覆盖并自动重启（设计见 [`docs/plans/design/updater.md`](docs/plans/design/updater.md)）。若覆盖安装后**任务栏**图标仍是旧图，多为系统图标缓存：重启资源管理器或取消固定后再固定快捷方式；托盘图标随新包内 `app.ico` 加载。
 
@@ -52,7 +52,7 @@ api_key = "sk-xxx"
 model = "your-model"
 ```
 
-也可在运行后打开「设置」填写 API URL、API Key 与模型名，并修改 Windows 问答快捷键（保存后立即生效）。
+也可在运行后打开「设置」填写 API URL、API Key 与模型名，并修改选区问答 / 手动输入全局快捷键（保存后立即生效）。
 
 ## 运行
 
@@ -97,6 +97,7 @@ chmod +x scripts/build_macos.sh
 |------|------|
 | **拖选**一段字幕（按住拖过多个词，松手） | 原文写入系统剪贴板（尽力而为），并经本机桥接 `POST /v1/translate` **立刻**唤起桌面翻译窗流式翻译 |
 | **单击**单个单词 | 暂停视频，页内弹层显示语境释义（`/v1/lookup`）；关闭弹层后按需恢复播放 |
+| **`Space` 暂停**后 | 自动高亮当前句最后一个词；`←`/`→` 逐词移动，`Shift+←/→` 扩选或收缩；`Enter` 对单词查义、对短语在**字幕旁 tip 显示译文**（不抢桌面窗）；`Esc` 退出键盘模式（保持暂停），再按 `Space` 关闭 tip 并恢复播放 |
 
 翻译**不依赖**「浏览器剪贴板变化是否被 Qt 听到」：复制是同步剪贴板，触发翻译以桥接为准。拖选过程使用 pointer capture + 自绘高亮，播放中控制栏弹出也不易丢手势；原文在桌面侧会折叠为单行。扩展会记录同视频实际经过的前 5 条字幕作为翻译语境；切视频、拖动进度或闲置超过 5 分钟会自动清空。
 
@@ -105,7 +106,7 @@ chmod +x scripts/build_macos.sh
 1. 安装并运行 Windows **Setup**（或便携版 + 同目录 NmHost）  
 2. 用 **Microsoft Edge** 按引导页安装扩展（Edge Add-ons 上架后为一键获取；上架前引导页会说明过渡方式）  
 3. 扩展一般会 **自动配对** 桌面端；失败时在桌面 **设置 → 开始配对**，扩展弹窗输入 6 位码  
-4. 打开 YouTube、**开启字幕**，在扩展字幕条上拖选或单击即可  
+4. 打开 YouTube、**开启字幕**，在扩展字幕条上拖选、单击，或 `Space` 暂停后用方向键选词即可  
 
 桌面端也可随时用 **设置 / 托盘 → 安装浏览器扩展** 打开引导页。本机桥接默认启用；密钥始终留在桌面端。
 
@@ -138,13 +139,13 @@ Edge → `edge://extensions` → 打开「开发人员模式」→「加载解�
 
 - 启动时窗口锚定到屏幕可用区域右下角（避开任务栏 / Dock）；可拖动标题栏移动，也可拖边缘 / 四角调整大小，之后不再强拉
 - `QClipboard.dataChanged` 事件监听（非轮询）；复制后约 1s 确认再翻译，避免语音工具短暂改写剪贴板造成闪烁
-- Windows 默认按 `Ctrl+Shift+Q` 一步复制当前选区并回答；快捷键可在设置中修改，普通 `Ctrl+C` 自动翻译保持不变
-- Windows 默认按 `Ctrl+M` 呼出半透明手动输入框；`Enter` 提交翻译，`Shift+Enter` 换行，`Esc` 关闭，位置、尺寸和透明度会自动记住
+- Windows 默认 `Ctrl+Shift+Q`、macOS 默认 `Alt+Shift+Q`（⌥⇧Q）：一步复制当前选区并回答；快捷键可在设置中修改，普通复制自动翻译保持不变。macOS 选区问答需在「系统设置 → 隐私与安全性 → 辅助功能」中授权本应用
+- Windows 默认 `Ctrl+M`、macOS 默认 `Alt+M`（⌥M）：呼出半透明手动输入框；`Enter` 提交翻译，`Shift+Enter` 换行，`Esc` 关闭，位置、尺寸和透明度会自动记住。配置里 `Ctrl` 表示 Control（⌃），`Cmd` 表示 Command（⌘）
 - 问答上下文仅在当前进程内连续，翻译与问答会话严格隔离；可从主窗或托盘手动清空
 - 普通复制翻译使用最近 5 分钟内的前 5 条原文作为显式语境；单条最多约 500 Token、总计约 2000 Token，只存内存且可随时清空
 - LLM `stream=true`，首 token 上屏
 - `requests.Session` 长连接 + LRU 缓存 + 新复制抢占旧任务（含缓存命中）
-- 网页 / 桌面软件 / Steam 等凡是走系统剪切板的来源均可；YouTube 字幕划词另走本机桥接直达（见上节）
+- 网页 / 桌面软件 / Steam 等凡是走系统剪切板的来源均可；YouTube 字幕划词另走本机桥接直达（见上节）；暂停后可用方向键纯键盘查词/译短语
 - 语音误触已用确认窗抑制；仍冲突时可用托盘「暂停监听」
 - 状态栏下方展示今日已用（本机估算）与 DeepSeek 账户剩余余额；设计见 [`docs/plans/design/billing-balance.md`](docs/plans/design/billing-balance.md)
 - 可选浏览器桥接：点词查义写入历史时标记为 `youtube_word_lookup`；划词整段翻译走与剪贴板相同的主窗翻译路径

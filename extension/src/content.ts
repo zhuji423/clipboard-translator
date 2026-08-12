@@ -41,8 +41,120 @@ function resumeIfOwned(): void {
   wasPlayingBeforePause = false;
 }
 
+function invalidateActiveRequest(): void {
+  activeRequestId = "";
+}
+
+function closeTipQuietly(): void {
+  if (!overlay.isTipVisible()) return;
+  overlay.hideTip();
+  invalidateActiveRequest();
+  resumeIfOwned();
+}
+
+function enterKeyboardMode(): void {
+  if (pauseOwned) return;
+  if (overlay.isKeyboardMode()) return;
+  if (overlay.wordCount() <= 0) return;
+  closeTipQuietly();
+  overlay.enterKeyboardSelection();
+}
+
+function exitKeyboardMode(options?: {
+  play?: boolean;
+  keepTip?: boolean;
+}): void {
+  if (!overlay.isKeyboardMode()) {
+    if (options?.play) {
+      void getVideo()?.play().catch(() => undefined);
+    }
+    return;
+  }
+  if (!options?.keepTip) {
+    closeTipQuietly();
+  }
+  overlay.exitKeyboardSelection();
+  if (options?.play) {
+    pauseOwned = false;
+    wasPlayingBeforePause = false;
+    void getVideo()?.play().catch(() => undefined);
+  }
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  const el =
+    target instanceof HTMLElement
+      ? target
+      : target.parentElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  return Boolean(el.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function onDocumentKeyDown(ev: KeyboardEvent): void {
+  if (!overlay.isKeyboardMode()) return;
+  if (isEditableTarget(ev.target)) return;
+
+  const key = ev.key;
+  if (key === "ArrowLeft" || key === "ArrowRight") {
+    if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeTipQuietly();
+    const delta = key === "ArrowLeft" ? -1 : 1;
+    if (ev.shiftKey) overlay.extendKeyboardSelection(delta);
+    else overlay.moveKeyboardSelection(delta);
+    return;
+  }
+
+  if (key === "Enter") {
+    if (ev.ctrlKey || ev.altKey || ev.metaKey || ev.shiftKey) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    overlay.submitKeyboardSelection();
+    return;
+  }
+
+  if (key === "Escape") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (overlay.isTipVisible()) {
+      closeTipQuietly();
+      return;
+    }
+    exitKeyboardMode();
+    return;
+  }
+
+  if (key === " " || key === "Spacebar") {
+    // Exit tip/keyboard mode first, then let YouTube handle Space for play.
+    // preventDefault + video.play() desyncs the player (short press fails, long press "works").
+    exitKeyboardMode();
+    return;
+  }
+}
+
+function onVideoPause(): void {
+  if (pauseOwned) return;
+  enterKeyboardMode();
+}
+
+function onVideoPlay(): void {
+  exitKeyboardMode();
+}
+
 overlay.onCloseTip = () => {
   activeRequestId = "";
+  if (overlay.isKeyboardMode()) {
+    overlay.exitKeyboardSelection();
+    pauseOwned = false;
+    wasPlayingBeforePause = false;
+    void getVideo()?.play().catch(() => undefined);
+    return;
+  }
   resumeIfOwned();
 };
 
@@ -84,8 +196,61 @@ overlay.mountPhraseSelectHandler(({ text, context }) => {
     contextSession,
   );
   flushPendingContextCue();
+  if (overlay.isKeyboardMode()) {
+    void sendPhraseInline(text, translationContext);
+    return;
+  }
   void sendPhraseToDesktop(text, translationContext);
 });
+
+async function sendPhraseInline(
+  text: string,
+  context: SubtitleTranslationContext,
+): Promise<void> {
+  const value = text.replace(/\s+/g, " ").trim();
+  if (!value) return;
+
+  requestSeq += 1;
+  const requestId = `ti${requestSeq}`;
+  activeRequestId = requestId;
+  const anchor = overlay.keyboardSelectionAnchor();
+  overlay.showTranslationLoading(anchor, value);
+
+  chrome.runtime.sendMessage(
+    {
+      type: "TRANSLATE",
+      text: value,
+      context,
+      requestId,
+      inline: true,
+    },
+    (response: TranslateResponse | undefined) => {
+      if (chrome.runtime.lastError) {
+        if (activeRequestId !== requestId) return;
+        overlay.showError(
+          anchor,
+          value,
+          chrome.runtime.lastError.message || "扩展通信失败",
+        );
+        return;
+      }
+      if (!response || activeRequestId !== requestId) return;
+      if (
+        response.contextSession &&
+        response.contextSession !== contextSession
+      ) {
+        contextSession = response.contextSession;
+        subtitleContext.reset();
+        pendingContextCue = null;
+      }
+      if (!response.ok || !response.translation) {
+        overlay.showError(anchor, value, response.error || "翻译失败");
+        return;
+      }
+      overlay.showTranslation(anchor, value, response.translation);
+    },
+  );
+}
 
 async function sendPhraseToDesktop(
   text: string,
@@ -148,6 +313,11 @@ async function writeClipboardText(text: string): Promise<void> {
 adapter.hideNativeCaptions(true);
 adapter.start((cue) => {
   if (!cue) {
+    if (overlay.isKeyboardMode()) {
+      // Keep frozen keyboard selection; YouTube often clears CC DOM on pause.
+      overlay.clear();
+      return;
+    }
     overlay.clear();
     if (overlay.isTipVisible()) {
       // Keep tip if user is reading, but clear subtitle line.
@@ -155,7 +325,7 @@ adapter.start((cue) => {
     }
     return;
   }
-  if (overlay.isSelecting()) pendingContextCue = cue.text;
+  if (overlay.isCueFrozen()) pendingContextCue = cue.text;
   else subtitleContext.push(cue.text);
   overlay.render(cue.text);
 });
@@ -171,8 +341,9 @@ let lastHref = location.href;
 const navObserver = new MutationObserver(() => {
   if (location.href !== lastHref) {
     lastHref = location.href;
-    activeRequestId = "";
+    invalidateActiveRequest();
     overlay.hideTip();
+    exitKeyboardMode();
     overlay.clear();
     pauseOwned = false;
     wasPlayingBeforePause = false;
@@ -200,17 +371,34 @@ const bindPlayerResize = () => {
   }
   const video = adapter.getVideo();
   if (video && video !== observedVideo) {
-    observedVideo?.removeEventListener("seeking", onVideoSeeking);
+    if (observedVideo) {
+      observedVideo.removeEventListener("seeking", onVideoSeeking);
+      observedVideo.removeEventListener("pause", onVideoPause);
+      observedVideo.removeEventListener("play", onVideoPlay);
+    }
     observedVideo = video;
     observedVideo.addEventListener("seeking", onVideoSeeking);
+    observedVideo.addEventListener("pause", onVideoPause);
+    observedVideo.addEventListener("play", onVideoPlay);
+    if (observedVideo.paused && !pauseOwned) {
+      enterKeyboardMode();
+    }
   }
 };
 bindPlayerResize();
 setInterval(bindPlayerResize, 2000);
 
+document.addEventListener("keydown", onDocumentKeyDown, true);
+
 window.addEventListener("beforeunload", () => {
   adapter.stop();
-  observedVideo?.removeEventListener("seeking", onVideoSeeking);
+  if (observedVideo) {
+    observedVideo.removeEventListener("seeking", onVideoSeeking);
+    observedVideo.removeEventListener("pause", onVideoPause);
+    observedVideo.removeEventListener("play", onVideoPlay);
+  }
+  document.removeEventListener("keydown", onDocumentKeyDown, true);
+  exitKeyboardMode();
   overlay.destroy();
   navObserver.disconnect();
 });

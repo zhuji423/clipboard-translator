@@ -1,4 +1,5 @@
 import { tokenizeSubtitle } from "./tokenize";
+import { WordSelectionState } from "./word_selection";
 
 export type WordClickPayload = {
   word: string;
@@ -47,6 +48,8 @@ export class SubtitleOverlay {
   private toastEl: HTMLDivElement | null = null;
   private toastTimer = 0;
   private selecting = false;
+  private keyboardMode = false;
+  private keyboardSelection = new WordSelectionState();
   private pendingCue: string | null = null;
   private capturePointerId: number | null = null;
   private dragStartIndex = -1;
@@ -116,6 +119,10 @@ export class SubtitleOverlay {
         }
         .word.word-selected {
           background: rgba(60, 120, 216, 0.75);
+        }
+        .word.word-cursor {
+          outline: 2px solid rgba(138, 180, 248, 0.95);
+          outline-offset: 1px;
         }
         .punct, .space { white-space: pre; user-select: none; }
         .toast {
@@ -286,7 +293,92 @@ export class SubtitleOverlay {
     return this.selecting;
   }
 
+  isKeyboardMode(): boolean {
+    return this.keyboardMode;
+  }
+
+  isCueFrozen(): boolean {
+    return this.selecting || this.keyboardMode;
+  }
+
+  wordCount(): number {
+    return this.lineEl.querySelectorAll(".word").length;
+  }
+
+  enterKeyboardSelection(): boolean {
+    const count = this.wordCount();
+    if (!this.keyboardSelection.enter(count)) {
+      return false;
+    }
+    this.keyboardMode = true;
+    this.paintKeyboardSelection();
+    return true;
+  }
+
+  exitKeyboardSelection(): void {
+    if (!this.keyboardMode && !this.keyboardSelection.active) return;
+    this.keyboardSelection.exit();
+    this.keyboardMode = false;
+    this.clearSelectionHighlight();
+    this.clearCursorHighlight();
+    const pending = this.pendingCue;
+    this.pendingCue = null;
+    if (pending !== null) {
+      this.applyRender(pending);
+    }
+  }
+
+  moveKeyboardSelection(delta: number): boolean {
+    if (!this.keyboardMode) return false;
+    const changed = this.keyboardSelection.move(delta);
+    if (changed) this.paintKeyboardSelection();
+    return changed;
+  }
+
+  extendKeyboardSelection(delta: number): boolean {
+    if (!this.keyboardMode) return false;
+    const changed = this.keyboardSelection.extend(delta);
+    if (changed) this.paintKeyboardSelection();
+    return changed;
+  }
+
+  submitKeyboardSelection(): boolean {
+    if (!this.keyboardMode || !this.keyboardSelection.active) return false;
+    const range = this.keyboardSelection.range();
+    if (!range) return false;
+    const words = Array.from(this.lineEl.querySelectorAll<HTMLElement>(".word"));
+    if (!words.length) return false;
+
+    if (this.keyboardSelection.isSingleWord()) {
+      const el = words[range.from];
+      if (!el) return false;
+      const word = (el.dataset.word || el.textContent || "").trim();
+      if (!word) return false;
+      this.onWordClick?.({
+        word,
+        context: this.currentContext,
+        anchor: el.getBoundingClientRect(),
+      });
+      return true;
+    }
+
+    const phrase = this.textBetweenWordIndexes(range.from, range.to);
+    if (phrase.length < MIN_PHRASE_CHARS) {
+      this.showToast("选区太短");
+      return false;
+    }
+    this.onPhraseSelect?.({
+      text:
+        phrase.length > MAX_PHRASE_CHARS
+          ? phrase.slice(0, MAX_PHRASE_CHARS)
+          : phrase,
+      context: this.currentContext,
+    });
+    return true;
+  }
+
   destroy(): void {
+    this.exitKeyboardSelection();
     this.releaseCapture();
     this.lineEl.removeEventListener("pointermove", this.onLinePointerMove);
     this.lineEl.removeEventListener("pointerup", this.onLinePointerUp);
@@ -300,7 +392,7 @@ export class SubtitleOverlay {
   }
 
   clear(): void {
-    if (this.selecting) {
+    if (this.isCueFrozen()) {
       this.pendingCue = "";
       return;
     }
@@ -311,7 +403,7 @@ export class SubtitleOverlay {
   }
 
   render(text: string): void {
-    if (this.selecting) {
+    if (this.isCueFrozen()) {
       this.pendingCue = text;
       return;
     }
@@ -357,6 +449,9 @@ export class SubtitleOverlay {
 
   private beginSelectFromPoint(ev: PointerEvent): void {
     if (ev.button !== 0) return;
+    if (this.keyboardMode) {
+      this.exitKeyboardSelection();
+    }
     const wordEl =
       this.wordElFromPoint(ev.clientX, ev.clientY) ||
       this.nearestWordEl(ev.clientX, ev.clientY, SNAP_PX);
@@ -483,10 +578,29 @@ export class SubtitleOverlay {
     });
   }
 
+  private paintKeyboardSelection(): void {
+    const range = this.keyboardSelection.range();
+    const words = Array.from(this.lineEl.querySelectorAll<HTMLElement>(".word"));
+    if (!range || !words.length) return;
+    words.forEach((word, i) => {
+      word.classList.toggle("word-selected", i >= range.from && i <= range.to);
+      word.classList.toggle(
+        "word-cursor",
+        i === this.keyboardSelection.focusIndex,
+      );
+    });
+  }
+
   private clearSelectionHighlight(): void {
-    for (const word of this.lineEl.querySelectorAll(".word-selected")) {
+    this.lineEl.querySelectorAll(".word-selected").forEach((word) => {
       word.classList.remove("word-selected");
-    }
+    });
+  }
+
+  private clearCursorHighlight(): void {
+    this.lineEl.querySelectorAll(".word-cursor").forEach((word) => {
+      word.classList.remove("word-cursor");
+    });
   }
 
   private wordElFromPoint(x: number, y: number): HTMLElement | null {
@@ -574,6 +688,44 @@ export class SubtitleOverlay {
       secondary: true,
     });
     this.openTip(anchor);
+  }
+
+  showTranslationLoading(anchor: DOMRect, source: string): void {
+    this.setTipContent({
+      word: this.truncateTipTitle(source),
+      meta: "",
+      gloss: "",
+      body: "翻译中…",
+      closeLabel: "关闭",
+      secondary: true,
+    });
+    this.openTip(anchor);
+  }
+
+  showTranslation(anchor: DOMRect, source: string, translation: string): void {
+    this.setTipContent({
+      word: this.truncateTipTitle(source),
+      meta: "",
+      gloss: "",
+      body: translation || "（无译文）",
+      closeLabel: "关闭并继续",
+      secondary: false,
+    });
+    this.openTip(anchor);
+  }
+
+  keyboardSelectionAnchor(): DOMRect {
+    const cursor = this.lineEl.querySelector<HTMLElement>(".word-cursor");
+    if (cursor) return cursor.getBoundingClientRect();
+    const selected = this.lineEl.querySelector<HTMLElement>(".word-selected");
+    if (selected) return selected.getBoundingClientRect();
+    return this.lineEl.getBoundingClientRect();
+  }
+
+  private truncateTipTitle(text: string, max = 48): string {
+    const value = text.replace(/\s+/g, " ").trim();
+    if (value.length <= max) return value;
+    return `${value.slice(0, max - 1)}…`;
   }
 
   hideTip(): void {

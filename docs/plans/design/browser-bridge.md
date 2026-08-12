@@ -10,8 +10,9 @@
 |------|------|------|------|
 | GET | `/health` | 无 | 探测桌面是否在线、是否已有 token（引导页也会轮询） |
 | POST | `/v1/pair` | 无（一次性短码） | body: `{ "code": "123456" }` → `{ token, port }` |
+| POST | `/v1/auto_pair` | 校验 `Origin` 为已钉死扩展 ID（缺省 Origin 在 loopback 上允许） | 零点击：若无 token 则生成并写入配置 → `{ ok, token, port }` |
 | POST | `/v1/lookup` | `Authorization: Bearer <token>` | body: `{ word, context, target_lang? }` |
-| POST | `/v1/translate` | `Authorization: Bearer <token>` | body: `{ text, context? }` → 桌面主窗整段翻译（划词） |
+| POST | `/v1/translate` | `Authorization: Bearer <token>` | body: `{ text, context?, inline? }` → 默认唤起桌面主窗整段翻译；`inline: true` 时同步返回 `{ translation }` 供页内 tip（不抢焦点） |
 
 `context` 可包含 `{ source: "youtube", session, previous, current }`。桌面端不信任扩展预算，会再次限制为前 5 条、单条约 500 Token、总计约 2000 Token；`current` 与 `text` 相同时不重复发送给模型。旧版 `{ text }` 请求保持兼容。
 
@@ -19,17 +20,19 @@
 
 配对码默认 120 秒有效；令牌写入桌面 `config.toml` 的 `[bridge].token` 与扩展 `chrome.storage.local`。
 
-## Native Messaging（零点击配对）
+## Native Messaging（零点击配对，主要 Windows）
 
 | 项 | 值 |
 |----|-----|
 | Host 名 | `com.clipboard_translator.bridge` |
-| 程序 | `ClipboardTranslatorNmHost.exe`（与主程序同目录） |
+| 程序 | Windows：`ClipboardTranslatorNmHost.exe`（与主程序同目录） |
 | 请求 | `{ "type": "get_bridge_credentials" }` |
 | 响应 | `{ "ok": true, "port": 17890, "token": "..." }`（不返回 API Key） |
 
+扩展「自动连接」顺序：`POST /v1/auto_pair`（HTTP）→ Native Messaging → 短码 `/v1/pair`。
+
 Windows：Setup 与打包版首次运行写入 `HKCU\...\NativeMessagingHosts\...`，manifest 落在 `%APPDATA%\ClipboardTranslator\native_messaging\`。  
-扩展在启动 / popup「自动连接」时 `sendNativeMessage`；失败回退短码 `/v1/pair`。
+macOS：**不**注册 / 不打包 NmHost（避免 Gatekeeper 拦截 onefile 解压的 `libpython`）；启动时清理旧清单；零点击依赖 HTTP `/v1/auto_pair`。
 
 常量见仓库根目录 [`distribution.py`](../../../distribution.py)；扩展 ID 由构建时嵌入的公钥固定。
 

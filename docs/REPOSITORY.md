@@ -8,7 +8,7 @@
 clipboard-translator/
   ├── main.py, *.py           # 桌面端（PySide6）运行时代码
   ├── distribution.py         # 引导页 / 商店 URL、扩展 ID、NM 常量
-  ├── native_messaging.py     # Windows NM 注册表写入
+  ├── native_messaging.py     # Chrome/Edge Native Messaging 注册（Windows + macOS）
   ├── native_host/            # Native Messaging host（stdio）
   ├── config.example.toml     # 配置示例（勿提交个人密钥）
   ├── version.py              # 唯一版本源

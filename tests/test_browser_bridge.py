@@ -153,6 +153,63 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
         bridge.stop()
 
 
+def test_auto_pair_http_creates_and_reuses_token() -> None:
+    from distribution import EXTENSION_EDGE_ID
+
+    state = {"token": "", "enabled": True, "port": 17992}
+
+    def provider() -> BridgeConfig:
+        return BridgeConfig(enabled=state["enabled"], port=state["port"], token=state["token"])
+
+    bridge = BrowserBridge(
+        config_provider=provider,
+        target_lang_provider=lambda: "zh",
+        on_lookup=lambda *_a: {},
+        on_token_saved=lambda token: state.__setitem__("token", token),
+    )
+    bridge.start()
+    try:
+        status, forbidden = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/auto_pair",
+            {},
+            headers={"Origin": "https://evil.example"},
+        )
+        assert status == 403
+        assert not state["token"]
+
+        status, first = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/auto_pair",
+            {},
+            headers={"Origin": f"chrome-extension://{EXTENSION_EDGE_ID}"},
+        )
+        assert status == 200
+        assert first["ok"] is True
+        assert first["token"]
+        assert state["token"] == first["token"]
+
+        status, second = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/auto_pair",
+            {},
+            headers={"Origin": f"chrome-extension://{EXTENSION_EDGE_ID}/"},
+        )
+        assert status == 200
+        assert second["token"] == first["token"]
+
+        # Missing Origin allowed on loopback
+        status, third = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/auto_pair",
+            {},
+        )
+        assert status == 200
+        assert third["token"] == first["token"]
+    finally:
+        bridge.stop()
+
+
 def test_word_lookup_json_parse() -> None:
     from word_lookup import _parse_lookup_json
 

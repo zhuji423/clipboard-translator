@@ -10,7 +10,7 @@ export const STORAGE_KEYS = {
   pairSource: "pairSource",
 } as const;
 
-export type PairSource = "native" | "code" | "";
+export type PairSource = "native" | "http" | "code" | "";
 
 export type BridgeSettings = {
   token: string;
@@ -73,6 +73,7 @@ export type TranslateRequest = {
   text: string;
   context?: SubtitleTranslationContext;
   requestId: string;
+  inline?: boolean;
 };
 
 export type TranslateResponse = {
@@ -81,6 +82,7 @@ export type TranslateResponse = {
   ok: boolean;
   error?: string;
   contextSession?: string;
+  translation?: string;
 };
 
 export type ExtensionMessage =

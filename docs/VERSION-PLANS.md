@@ -217,6 +217,48 @@
 | 编写/使用的计划 | [`context-aware-translation`](plans/history/context-aware-translation.md)（设计：[design/browser-bridge](plans/design/browser-bridge.md)） |
 | 完成工作 | 普通复制使用 5 分钟内前 5 条原文；YouTube 使用同视频经过字幕；统一 500/2000 近似 Token 预算；翻译无隐式全天会话；缓存按上下文隔离；支持手动清空与跨重启 session 失效 |
 
+### 0.14.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-global-hotkeys`](plans/history/macos-global-hotkeys.md) |
+| 完成工作 | macOS Carbon 全局热键 + Cmd+C 选区捕获；设置页双端可改问答/手动输入键；Mac 默认 ⌥⇧Q / ⌥M；手动输入框挂 NSPanel 全屏锚点 |
+
+### 0.15.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`youtube-keyboard-subtitle-selection`](plans/history/youtube-keyboard-subtitle-selection.md) |
+| 完成工作 | YouTube 暂停进入键盘选词模式；末词默认高亮；方向键移动 / Shift 扩选；Enter 复用 LOOKUP/TRANSLATE；cue 冻结与 pauseOwned 保护 |
+
+### 0.16.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`youtube-inline-phrase-translation`](plans/history/youtube-inline-phrase-translation.md) |
+| 完成工作 | `/v1/translate` 支持 `inline` 同步返回译文；键盘短语在 tip 展示；Space / 关闭并继续 可续播；鼠标拖选仍走桌面窗 |
+
+### 0.16.1
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | （续）键盘 Space 续播 |
+| 完成工作 | Space 退出键盘模式后放行给 YouTube，修复短按无法流畅续播 |
+
+### 0.17.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-native-messaging`](plans/history/macos-native-messaging.md) |
+| 完成工作 | 曾为 Mac 打包/注册 NmHost 做零点击；实机 Gatekeeper 问题后由 **0.17.1 HTTP** 取代 Mac 侧 NM |
+
+### 0.17.1
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`macos-http-auto-pair`](plans/history/macos-http-auto-pair.md)（设计：[design/browser-bridge](plans/design/browser-bridge.md)、[design/macos-release](plans/design/macos-release.md)） |
+| 完成工作 | `POST /v1/auto_pair`；扩展 HTTP 优先自动配对；Mac 停用 NmHost / 清理 NM 清单，避开 Gatekeeper |
+
 ---
 
 ## 未完成 / 暂停（todo）

@@ -1,6 +1,7 @@
 import {
   AutoPairResponse,
   BridgeSettings,
+  DEFAULT_PORT,
   ExtensionMessage,
   HealthResponse,
   LookupResponse,
@@ -63,7 +64,12 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
     return lookup(message.word, message.context, message.requestId);
   }
   if (message.type === "TRANSLATE") {
-    return translate(message.text, message.context, message.requestId);
+    return translate(
+      message.text,
+      message.context,
+      message.requestId,
+      Boolean(message.inline),
+    );
   }
   return { type: "HEALTH_RESULT", ok: false, paired: false, online: false, error: "unknown message" };
 }
@@ -92,6 +98,39 @@ async function sendNativeCredentials(): Promise<{
   }
 }
 
+async function sendHttpAutoPair(port: number): Promise<{
+  ok: boolean;
+  port?: number;
+  token?: string;
+  error?: string;
+}> {
+  try {
+    const resp = await fetch(`${bridgeBase(port)}/v1/auto_pair`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(3000),
+    });
+    const data = (await resp.json()) as {
+      ok?: boolean;
+      token?: string;
+      port?: number;
+      error?: string;
+    };
+    if (!resp.ok || !data?.ok || !data.token) {
+      return { ok: false, error: data?.error || `自动配对失败（HTTP ${resp.status}）` };
+    }
+    return {
+      ok: true,
+      port: Number(data.port) || port,
+      token: String(data.token),
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg || "无法连接桌面端自动配对接口" };
+  }
+}
+
 async function tryAutoPair(): Promise<AutoPairResponse> {
   const settings = await loadSettings();
   if (settings.token) {
@@ -99,15 +138,27 @@ async function tryAutoPair(): Promise<AutoPairResponse> {
       type: "AUTO_PAIR_RESULT",
       ok: true,
       port: settings.port,
-      pairSource: settings.pairSource || "native",
+      pairSource: settings.pairSource || "http",
     };
   }
+
+  const http = await sendHttpAutoPair(settings.port || DEFAULT_PORT);
+  if (http.ok && http.token) {
+    const port = http.port && http.port > 0 ? http.port : settings.port;
+    await chrome.storage.local.set({
+      [STORAGE_KEYS.token]: http.token,
+      [STORAGE_KEYS.port]: port,
+      [STORAGE_KEYS.pairSource]: "http",
+    });
+    return { type: "AUTO_PAIR_RESULT", ok: true, port, pairSource: "http" };
+  }
+
   const nm = await sendNativeCredentials();
   if (!nm.ok || !nm.token) {
     return {
       type: "AUTO_PAIR_RESULT",
       ok: false,
-      error: nm.error || "自动配对失败，请使用短码配对",
+      error: http.error || nm.error || "自动配对失败，请使用短码配对",
     };
   }
   const port = nm.port && nm.port > 0 ? nm.port : settings.port;
@@ -291,6 +342,7 @@ async function translate(
   text: string,
   context: TranslateRequest["context"],
   requestId: string,
+  inline = false,
 ): Promise<TranslateResponse> {
   const settings = await loadSettings();
   if (!settings.enabled) {
@@ -321,6 +373,7 @@ async function translate(
       error: "尚未配对桌面端",
     };
   }
+  const timeoutMs = inline ? 60_000 : 10_000;
   try {
     const resp = await fetch(`${bridgeBase(latest.port)}/v1/translate`, {
       method: "POST",
@@ -328,13 +381,14 @@ async function translate(
         "Content-Type": "application/json",
         Authorization: `Bearer ${latest.token}`,
       },
-      body: JSON.stringify({ text, context }),
-      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({ text, context, inline: inline || undefined }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const data = (await resp.json()) as {
       ok?: boolean;
       error?: string;
       context_session?: string;
+      translation?: string;
     };
     if (!resp.ok || !data.ok) {
       return {
@@ -342,6 +396,24 @@ async function translate(
         requestId,
         ok: false,
         error: String(data.error || `翻译请求失败（HTTP ${resp.status}）`),
+      };
+    }
+    if (inline) {
+      const translation = String(data.translation || "").trim();
+      if (!translation) {
+        return {
+          type: "TRANSLATE_RESULT",
+          requestId,
+          ok: false,
+          error: "译文为空",
+        };
+      }
+      return {
+        type: "TRANSLATE_RESULT",
+        requestId,
+        ok: true,
+        translation,
+        contextSession: data.context_session,
       };
     }
     return {

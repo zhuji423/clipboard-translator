@@ -17,6 +17,7 @@ python -m pip install -r requirements.txt -r requirements-build.txt
 python -m pip install Pillow
 
 rm -rf build dist/ClipboardTranslator dist/"Clipboard Translator.app" dist/macos
+rm -f dist/ClipboardTranslatorNmHost
 
 python scripts/generate_app_icon.py
 if [[ ! -f assets/app.icns ]]; then
@@ -31,6 +32,10 @@ if [[ ! -d "$APP_SRC" ]]; then
   echo "Missing $APP_SRC" >&2
   exit 1
 fi
+
+# Ad-hoc sign local unsigned builds (Gatekeeper / first open).
+xattr -cr "$APP_SRC" 2>/dev/null || true
+codesign --force --deep --sign - "$APP_SRC"
 
 mkdir -p dist/macos
 ZIP_NAME="ClipboardTranslator-${VERSION}-macos.zip"

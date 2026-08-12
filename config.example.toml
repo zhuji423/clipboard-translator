@@ -14,10 +14,12 @@ always_on_top = true
 cache_size = 128
 font_size = 12
 # Windows：选中文本后一步复制并问答；可在设置中修改
+# macOS 首次生成配置时会写成 Alt+Shift+Q（⌥⇧Q）
 question_hotkey = "Ctrl+Shift+Q"
 
 [manual_input]
 # Windows：呼出半透明手动输入框，Enter 提交翻译
+# macOS 首次生成配置时会写成 Alt+M（⌥M）；配置里 Ctrl=Control、Cmd=Command
 hotkey = "Ctrl+M"
 opacity = 0.82
 width = 420

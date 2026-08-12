@@ -10,6 +10,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from translation_context import TranslationRequest, build_translation_context
+from distribution import extension_allowed_origins
 
 DEFAULT_BRIDGE_PORT = 17890
 PAIR_CODE_TTL_S = 120
@@ -57,6 +58,7 @@ class PairingSession:
 
 LookupHandler = Callable[[str, str, str], dict[str, Any]]
 TranslateHandler = Callable[[TranslationRequest], None]
+TranslateInlineHandler = Callable[[TranslationRequest], dict[str, Any]]
 ConfigProvider = Callable[[], BridgeConfig]
 TargetLangProvider = Callable[[], str]
 ContextSessionProvider = Callable[[], str]
@@ -72,6 +74,7 @@ class BrowserBridge:
         target_lang_provider: TargetLangProvider,
         on_lookup: LookupHandler,
         on_translate: TranslateHandler | None = None,
+        on_translate_inline: TranslateInlineHandler | None = None,
         on_token_saved: Callable[[str], None] | None = None,
         context_session_provider: ContextSessionProvider | None = None,
     ) -> None:
@@ -79,6 +82,7 @@ class BrowserBridge:
         self._target_lang_provider = target_lang_provider
         self._on_lookup = on_lookup
         self._on_translate = on_translate
+        self._on_translate_inline = on_translate_inline
         self._on_token_saved = on_token_saved
         self._context_session_provider = context_session_provider or (lambda: "")
         self._lock = threading.Lock()
@@ -178,6 +182,41 @@ class BrowserBridge:
         if self._on_token_saved:
             self._on_token_saved(token)
         return token
+
+    def ensure_auto_pair_credentials(self) -> dict[str, Any]:
+        """Return bridge token for zero-click HTTP pairing (create if missing)."""
+        cfg = self._config_provider()
+        if not cfg.enabled:
+            raise RuntimeError("浏览器集成未启用")
+        token = (cfg.token or "").strip()
+        if not token:
+            token = secrets.token_urlsafe(32)
+            if self._on_token_saved:
+                self._on_token_saved(token)
+        return {
+            "ok": True,
+            "token": token,
+            "port": cfg.port or DEFAULT_BRIDGE_PORT,
+        }
+
+    @staticmethod
+    def _normalize_extension_origin(origin: str) -> str:
+        value = (origin or "").strip()
+        if not value:
+            return ""
+        return value if value.endswith("/") else f"{value}/"
+
+    def _extension_origin_allowed(self, headers: dict[str, str]) -> bool:
+        """Allow chrome-extension origins from distribution; missing Origin OK on loopback."""
+        raw = headers.get("Origin") or headers.get("origin") or ""
+        if not raw.strip():
+            # Extension SW / some clients omit Origin; server is loopback-only.
+            return True
+        normalized = self._normalize_extension_origin(raw)
+        allowed = {
+            self._normalize_extension_origin(item) for item in extension_allowed_origins()
+        }
+        return normalized in allowed
 
     def _authorized(self, headers: dict[str, str]) -> bool:
         auth = headers.get("Authorization") or headers.get("authorization") or ""
@@ -296,6 +335,18 @@ class BrowserBridge:
                     self._send(200, {"ok": True, "token": token, "port": bridge._config_provider().port})
                     return
 
+                if path == "/v1/auto_pair":
+                    if not bridge._extension_origin_allowed(dict(self.headers)):
+                        self._send(403, {"error": "来源未授权"})
+                        return
+                    try:
+                        payload = bridge.ensure_auto_pair_credentials()
+                    except RuntimeError as exc:
+                        self._send(400, {"error": str(exc)})
+                        return
+                    self._send(200, payload)
+                    return
+
                 if path == "/v1/lookup":
                     if not bridge._authorized(dict(self.headers)):
                         self._send(401, {"error": "未授权：请先在扩展中完成与桌面端的配对"})
@@ -320,7 +371,12 @@ class BrowserBridge:
                     if not bridge._authorized(dict(self.headers)):
                         self._send(401, {"error": "未授权：请先在扩展中完成与桌面端的配对"})
                         return
-                    if bridge._on_translate is None:
+                    inline = bool(data.get("inline"))
+                    if inline:
+                        if bridge._on_translate_inline is None:
+                            self._send(501, {"error": "桌面端未启用页内短语翻译"})
+                            return
+                    elif bridge._on_translate is None:
                         self._send(501, {"error": "桌面端未启用划词整段翻译"})
                         return
                     text = str(data.get("text") or "").strip()
@@ -354,14 +410,34 @@ class BrowserBridge:
                                 source=source,
                                 target_text=text,
                             )
+                    request = TranslationRequest(text=text, context=context)
+                    if inline:
+                        try:
+                            result = bridge._on_translate_inline(request)
+                        except Exception as exc:  # noqa: BLE001
+                            self._send(502, {"error": str(exc)})
+                            return
+                        if not isinstance(result, dict):
+                            self._send(502, {"error": "页内翻译返回格式无效"})
+                            return
+                        translation = str(result.get("translation") or "").strip()
+                        if not translation:
+                            self._send(502, {"error": "译文为空"})
+                            return
+                        response: dict[str, Any] = {
+                            "ok": True,
+                            "translation": translation,
+                        }
+                        if context_session:
+                            response["context_session"] = context_session
+                        self._send(200, response)
+                        return
                     try:
-                        bridge._on_translate(
-                            TranslationRequest(text=text, context=context)
-                        )
+                        bridge._on_translate(request)
                     except Exception as exc:  # noqa: BLE001
                         self._send(502, {"error": str(exc)})
                         return
-                    response: dict[str, Any] = {"ok": True}
+                    response = {"ok": True}
                     if context_session:
                         response["context_session"] = context_session
                     self._send(200, response)

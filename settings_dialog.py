@@ -26,7 +26,13 @@ from PySide6.QtWidgets import (
 from browser_bridge import DEFAULT_BRIDGE_PORT
 from config import BridgeSettings, LlmConfig
 from distribution import preferred_extension_install_url
-from global_hotkey import parse_hotkey
+from global_hotkey import (
+    config_hotkey_to_qt_portable,
+    default_manual_input_hotkey,
+    default_question_hotkey,
+    parse_hotkey,
+    qt_portable_to_config_hotkey,
+)
 from updater import format_version_with_date, local_changelog_date
 from version import __version__
 
@@ -57,8 +63,10 @@ class SettingsDialog(QDialog):
         font_size: int = 12,
         llm: LlmConfig | None = None,
         bridge: BridgeSettings | None = None,
-        question_hotkey: str = "Ctrl+Shift+Q",
+        question_hotkey: str = "",
+        manual_input_hotkey: str = "",
         question_hotkey_applier: Callable[[str], tuple[bool, str]] | None = None,
+        manual_input_hotkey_applier: Callable[[str], tuple[bool, str]] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -66,11 +74,15 @@ class SettingsDialog(QDialog):
         self.setWindowFlags(
             self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.resize(500, 590)
+        self.resize(500, 620)
         self._question_hotkey_applier = question_hotkey_applier
+        self._manual_input_hotkey_applier = manual_input_hotkey_applier
+        self._hotkeys_supported = sys.platform in ("win32", "darwin")
 
         llm = llm or LlmConfig(base_url="", api_key="", model="")
         bridge = bridge or BridgeSettings()
+        question_hotkey = question_hotkey or default_question_hotkey()
+        manual_input_hotkey = manual_input_hotkey or default_manual_input_hotkey()
 
         layout = QVBoxLayout(self)
 
@@ -100,16 +112,35 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel("快捷操作"))
         shortcut_form = QFormLayout()
         shortcut_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.question_hotkey_edit = QKeySequenceEdit(QKeySequence(question_hotkey))
+        self.question_hotkey_edit = QKeySequenceEdit(
+            QKeySequence(config_hotkey_to_qt_portable(question_hotkey))
+        )
         self.question_hotkey_edit.setClearButtonEnabled(True)
         self.question_hotkey_edit.setToolTip(
-            "Windows 全局快捷键：选中文本后一步复制并用连续会话回答"
+            "全局快捷键：选中文本后一步复制并用连续会话回答"
+            + ("（macOS 选区复制需开启辅助功能权限）" if sys.platform == "darwin" else "")
         )
         shortcut_form.addRow("选区问答", self.question_hotkey_edit)
-        if sys.platform != "win32":
+
+        self.manual_hotkey_edit = QKeySequenceEdit(
+            QKeySequence(config_hotkey_to_qt_portable(manual_input_hotkey))
+        )
+        self.manual_hotkey_edit.setClearButtonEnabled(True)
+        self.manual_hotkey_edit.setToolTip("全局快捷键：呼出半透明手动输入翻译框")
+        shortcut_form.addRow("手动输入", self.manual_hotkey_edit)
+
+        if not self._hotkeys_supported:
             self.question_hotkey_edit.setEnabled(False)
-            platform_note = QLabel("当前平台暂不支持全局问答快捷键")
+            self.manual_hotkey_edit.setEnabled(False)
+            platform_note = QLabel("当前平台暂不支持全局快捷键")
             platform_note.setObjectName("MetaLabel")
+            shortcut_form.addRow("", platform_note)
+        elif sys.platform == "darwin":
+            platform_note = QLabel(
+                "默认 ⌥⇧Q 问答、⌥M 手动输入；配置里 Ctrl=⌃、Cmd=⌘"
+            )
+            platform_note.setObjectName("MetaLabel")
+            platform_note.setWordWrap(True)
             shortcut_form.addRow("", platform_note)
         layout.addLayout(shortcut_form)
 
@@ -256,6 +287,12 @@ class SettingsDialog(QDialog):
     def _preview_font(self, size: int) -> None:
         self.preview.setFont(ui_font(size))
 
+    def _read_hotkey(self, edit: QKeySequenceEdit) -> str:
+        portable = edit.keySequence().toString(
+            QKeySequence.SequenceFormat.PortableText
+        )
+        return qt_portable_to_config_hotkey(portable)
+
     def _accept(self) -> None:
         base_url = self.url_edit.text().strip().rstrip("/")
         api_key = self.key_edit.text().strip()
@@ -263,17 +300,23 @@ class SettingsDialog(QDialog):
         if not base_url or not model:
             QMessageBox.warning(self, "设置", "API URL 与模型名不能为空。")
             return
-        if sys.platform == "win32":
-            hotkey_text = self.question_hotkey_edit.keySequence().toString(
-                QKeySequence.SequenceFormat.PortableText
-            )
+        if self._hotkeys_supported:
             try:
-                hotkey_text = parse_hotkey(hotkey_text).text
+                question_hotkey = self._read_hotkey(self.question_hotkey_edit)
+                manual_hotkey = self._read_hotkey(self.manual_hotkey_edit)
+                # Validate both even if appliers are absent
+                parse_hotkey(question_hotkey)
+                parse_hotkey(manual_hotkey)
             except ValueError as exc:
                 QMessageBox.warning(self, "设置", str(exc))
                 return
             if self._question_hotkey_applier is not None:
-                applied, error = self._question_hotkey_applier(hotkey_text)
+                applied, error = self._question_hotkey_applier(question_hotkey)
+                if not applied:
+                    QMessageBox.warning(self, "设置", error)
+                    return
+            if self._manual_input_hotkey_applier is not None:
+                applied, error = self._manual_input_hotkey_applier(manual_hotkey)
                 if not applied:
                     QMessageBox.warning(self, "设置", error)
                     return

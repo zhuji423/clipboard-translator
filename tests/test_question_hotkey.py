@@ -19,7 +19,15 @@ from config import (
     save_manual_input_settings,
     save_question_hotkey,
 )
-from global_hotkey import GlobalHotkeyManager, HotkeySpec, parse_hotkey
+from global_hotkey import (
+    GlobalHotkeyManager,
+    HotkeySpec,
+    config_hotkey_to_qt_portable,
+    default_manual_input_hotkey,
+    default_question_hotkey,
+    parse_hotkey,
+    qt_portable_to_config_hotkey,
+)
 from history_store import HistoryEntry, HistoryStore
 from main import AppController
 
@@ -62,6 +70,11 @@ def test_parse_hotkey_canonicalizes_and_validates() -> None:
     spec = parse_hotkey("shift+control+q")
     assert spec.text == "Ctrl+Shift+Q"
     assert spec.virtual_key == ord("Q")
+    assert spec.key_name == "Q"
+
+    cmd = parse_hotkey("command+m")
+    assert cmd.text == "Cmd+M"
+    assert cmd.modifiers & 0x0008  # MOD_WIN
 
     for invalid in ("", "Q", "Ctrl+Shift", "Ctrl+PageDown", "Ctrl+Q+W"):
         try:
@@ -70,6 +83,19 @@ def test_parse_hotkey_canonicalizes_and_validates() -> None:
             pass
         else:
             raise AssertionError(f"expected invalid shortcut: {invalid}")
+
+
+def test_mac_qt_hotkey_roundtrip_helpers() -> None:
+    if sys.platform != "darwin":
+        portable = config_hotkey_to_qt_portable("Ctrl+Shift+Q")
+        assert portable == "Ctrl+Shift+Q"
+        assert qt_portable_to_config_hotkey("Ctrl+Alt+F8") == "Ctrl+Alt+F8"
+        return
+    assert config_hotkey_to_qt_portable("Ctrl+Shift+Q") == "Meta+Shift+Q"
+    assert config_hotkey_to_qt_portable("Cmd+M") == "Ctrl+M"
+    assert config_hotkey_to_qt_portable("Alt+M") == "Alt+M"
+    assert qt_portable_to_config_hotkey("Meta+Shift+Q") == "Ctrl+Shift+Q"
+    assert qt_portable_to_config_hotkey("Ctrl+M") == "Cmd+M"
 
 
 def test_windows_input_structure_matches_win64_abi() -> None:
@@ -104,7 +130,7 @@ def test_question_hotkey_config_roundtrip(tmp_path: Path) -> None:
         "model = \"model\"\n\n[app]\ntarget_lang = \"zh\"\n",
         encoding="utf-8",
     )
-    assert load_config(path).app.question_hotkey == "Ctrl+Shift+Q"
+    assert load_config(path).app.question_hotkey == default_question_hotkey()
     save_question_hotkey("Ctrl+Alt+F8", path=path)
     assert load_config(path).app.question_hotkey == "Ctrl+Alt+F8"
 
@@ -117,7 +143,7 @@ def test_manual_input_config_roundtrip(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     cfg = load_config(path)
-    assert cfg.manual_input.hotkey == "Ctrl+M"
+    assert cfg.manual_input.hotkey == default_manual_input_hotkey()
     assert cfg.manual_input.opacity == 0.82
 
     save_manual_input_settings(
@@ -142,15 +168,28 @@ def test_multiple_hotkey_managers_keep_independent_shortcuts() -> None:
     question = GlobalHotkeyManager(backend=first)
     manual = GlobalHotkeyManager(backend=second)
     try:
-        assert question.rebind("Ctrl+Shift+Q") == (True, "")
-        assert manual.rebind("Ctrl+M") == (True, "")
-        assert question.shortcut == "Ctrl+Shift+Q"
-        assert manual.shortcut == "Ctrl+M"
-        assert first.registered == ["Ctrl+Shift+Q"]
-        assert second.registered == ["Ctrl+M"]
+        assert question.rebind("Alt+Shift+Q") == (True, "")
+        assert manual.rebind("Alt+M") == (True, "")
+        assert question.shortcut == "Alt+Shift+Q"
+        assert manual.shortcut == "Alt+M"
+        assert first.registered == ["Alt+Shift+Q"]
+        assert second.registered == ["Alt+M"]
     finally:
         question.close()
         manual.close()
+
+
+def test_mac_hotkey_backend_registers_when_available() -> None:
+    if sys.platform != "darwin":
+        return
+    manager = GlobalHotkeyManager(hotkey_id=0x54455354)  # 'TEST'
+    try:
+        assert manager.supported is True
+        ok, error = manager.rebind("Alt+Shift+F9")
+        assert ok is True, error
+        assert manager.shortcut == "Alt+Shift+F9"
+    finally:
+        manager.close()
 
 
 def test_question_clipboard_event_is_consumed_without_translation() -> None:

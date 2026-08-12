@@ -15,7 +15,18 @@ EDGE_ADDON_URL = ONBOARDING_URL
 
 NATIVE_HOST_NAME = "com.clipboard_translator.bridge"
 NATIVE_HOST_DESCRIPTION = "Clipboard Translator bridge credentials"
+# Windows binary name (kept for older callers / docs).
 NATIVE_HOST_EXE_NAME = "ClipboardTranslatorNmHost.exe"
+NATIVE_HOST_BIN_STEM = "ClipboardTranslatorNmHost"
+
+
+def native_host_bin_name() -> str:
+    """Platform-specific Native Messaging host executable filename."""
+    import sys
+
+    if sys.platform == "win32":
+        return NATIVE_HOST_EXE_NAME
+    return NATIVE_HOST_BIN_STEM
 
 # Stable ID from extension/keys (public key embedded in extension build).
 # Replace with Edge store-assigned ID if different after listing.

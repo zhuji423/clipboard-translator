@@ -13,7 +13,6 @@
 | [immersive-subtitles.md](immersive-subtitles.md) | 待排期 | TBD | 对标 Language Reactor 的沉浸字幕（双语叠字 / B 站 / 学习向播放） |
 | [account-sync-byok.md](account-sync-byok.md) | 待排期 | TBD | 自建账户 + BYOK 配置与历史多端同步 |
 | [activity-achievements-recall.md](activity-achievements-recall.md) | 待排期 | TBD | 粘贴/翻译频次绿格子成就 + 偶发回想推送 |
-| [youtube-keyboard-subtitle-selection.md](youtube-keyboard-subtitle-selection.md) | 待实现 | 0.13.0 | Space 暂停后用方向键完成单词查义与短语翻译 |
 
 ## 各项说明
 
@@ -50,16 +49,11 @@
   - 偶发回想推送（时间锚点 / 随机稀疏），隐私默认偏保守
   - Phase A 先绿格子，再成就，再回想
 
-### 4. YouTube 字幕纯键盘查词（计划 0.13.0）
-
-- **计划**：[youtube-keyboard-subtitle-selection.md](youtube-keyboard-subtitle-selection.md)
-- **目标体验**：按 `Space` 暂停后自动高亮当前字幕末词，用左右键移动、Shift+左右扩选，按 `Enter` 自动查单词或翻译短语。
-- **边界**：首版只覆盖现有 YouTube 交互字幕，不增加 B 站适配、逐词时间戳或快捷键设置。
-
 ## 已迁出（完成）
 
 | 主题 | 归档 | 版本 |
 |------|------|------|
+| YouTube 字幕纯键盘查词 | [`../plans/history/youtube-keyboard-subtitle-selection.md`](../plans/history/youtube-keyboard-subtitle-selection.md) | 0.15.0 |
 | 扩展分发与 NM 自动配对 | [`../plans/history/extension-distribution.md`](../plans/history/extension-distribution.md) | 0.9.0 |
 | Edge Add-ons 人工上架清单 | [`../guides/extension-store-publish.md`](../guides/extension-store-publish.md) | 运维（非代码） |
 | 术语括注提示词 | [`../plans/history/term-gloss-prompt.md`](../plans/history/term-gloss-prompt.md) | 0.11.1 |

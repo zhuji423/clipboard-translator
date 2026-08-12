@@ -6,9 +6,10 @@
 - CI：`.github/workflows/release-macos.yml`（`macos-latest`）
 - 本地：`./scripts/build_macos.sh`
 - 配置/历史：`~/Library/Application Support/ClipboardTranslator`
+- 扩展零点击配对：本机 HTTP `/v1/auto_pair`（**不**打包 / 不注册 Native Messaging host，避免 Gatekeeper）
 - 后台剪贴板：Qt `dataChanged` 在 macOS 不可靠，运行时用 `NSPasteboard.changeCount` 轮询（见 `macos_clipboard.py`）
 - 全屏叠层：当前 macOS 上 `FullScreenAuxiliary` 只对 `NSPanel` 生效；主窗（Qt `NSWindow`）挂到不可见非激活锚点 `NSPanel` 下作子窗口（见 `macos_window.py`），才能出现在系统全屏 Space 上
-- 产物未签名：用户需在 Finder 中右键 → 打开（首次 Gatekeeper）
+- 产物未签名：用户需在 Finder 中右键 → 打开（首次 Gatekeeper）；本地构建会 ad-hoc `codesign`
 
 ## 后续（需 Apple Developer Program）
 

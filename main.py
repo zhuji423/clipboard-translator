@@ -33,6 +33,7 @@ from config import (
     save_bridge_token,
     save_font_size,
     save_llm_settings,
+    save_manual_input_hotkey,
     save_manual_input_settings,
     save_question_hotkey,
 )
@@ -41,8 +42,9 @@ from native_messaging import register_native_messaging_host
 from history import HistoryDialog
 from history_store import HistoryEntry, HistoryStore, now_ts
 from macos_clipboard import MacClipboardPoller
-from global_hotkey import GlobalHotkeyManager, WindowsSelectionInput
+from global_hotkey import GlobalHotkeyManager, create_selection_input
 from manual_input_window import ManualInputWindow
+from macos_window import apply_overlay_space_behavior
 from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
@@ -274,7 +276,7 @@ class AppController(QObject):
             hotkey_id=MANUAL_INPUT_HOTKEY_ID,
         )
         self._selection_input = (
-            WindowsSelectionInput() if self._hotkey_manager.supported else None
+            create_selection_input() if self._hotkey_manager.supported else None
         )
         self._question_hotkey_error = ""
         self._manual_input_hotkey_error = ""
@@ -305,6 +307,12 @@ class AppController(QObject):
         self._manual_input_window.state_changed.connect(
             self._save_manual_input_state
         )
+        if sys.platform == "darwin":
+            # Defer until the native window exists (same pattern as main window).
+            QTimer.singleShot(
+                0,
+                lambda: apply_overlay_space_behavior(self._manual_input_window),
+            )
         self.bridge_token_changed.connect(self._apply_bridge_token_on_ui)
         self.bridge_lookup_recorded.connect(self.refresh_billing)
         self.bridge_translate_requested.connect(self._on_bridge_translate_requested)
@@ -313,6 +321,7 @@ class AppController(QObject):
             target_lang_provider=lambda: self._cfg.app.target_lang,
             on_lookup=self._bridge_lookup,
             on_translate=lambda request: self.bridge_translate_requested.emit(request),
+            on_translate_inline=self._bridge_translate_inline,
             on_token_saved=lambda token: self.bridge_token_changed.emit(token),
             context_session_provider=lambda: self._translation_context_session,
         )
@@ -456,6 +465,66 @@ class AppController(QObject):
         self._abort_clipboard_pending()
         self._apply_translation_text(normalized, request.context)
 
+    def _bridge_translate_inline(self, request: TranslationRequest) -> dict:
+        """Sync phrase translation for in-page tip (no desktop window)."""
+        text = " ".join(str(request.text or "").split()).strip()
+        if len(text) < self._cfg.app.min_chars:
+            raise ValueError("文本太短")
+        if len(text) > self._cfg.app.max_chars:
+            text = text[: self._cfg.app.max_chars]
+
+        target_lang = self._cfg.app.target_lang
+        cache_key = translation_cache_key(target_lang, text, request.context)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            self._history.append(
+                HistoryEntry(
+                    ts=now_ts(),
+                    source=text,
+                    result=cached,
+                    mode="translate",
+                    note="youtube_inline|local_cache",
+                )
+            )
+            self.bridge_lookup_recorded.emit()
+            return {"translation": cached}
+
+        cancel_event = Event()
+        result = self._translator.translate_stream(
+            text,
+            target_lang,
+            cancel_event,
+            None,
+            context=request.context,
+        )
+        translation = (result.text or "").strip()
+        if not translation:
+            raise RuntimeError("译文为空")
+
+        self._cache.put(cache_key, translation)
+        cost = estimate_cost(
+            self._cfg.llm.model,
+            result.usage.hit,
+            result.usage.miss,
+            result.usage.completion,
+        )
+        self._history.append(
+            HistoryEntry(
+                ts=now_ts(),
+                source=text,
+                result=translation,
+                hit=cost.hit,
+                miss=cost.miss,
+                completion=cost.completion,
+                cost_yuan=cost.cost_yuan,
+                saved_yuan=cost.saved_yuan,
+                mode="translate",
+                note="youtube_inline",
+            )
+        )
+        self.bridge_lookup_recorded.emit()
+        return {"translation": translation}
+
     def _bridge_lookup(self, word: str, context: str, target_lang: str) -> dict:
         word = normalize_word(word)
         context = normalize_context(context)
@@ -537,8 +606,17 @@ class AppController(QObject):
     @Slot()
     def capture_question_selection(self) -> None:
         if self._selection_input is None:
-            self._window.set_status("全局问答快捷键当前仅支持 Windows", error=True)
+            self._window.set_status("当前平台暂不支持全局问答快捷键", error=True)
             return
+        if sys.platform == "darwin":
+            trusted = getattr(self._selection_input, "accessibility_trusted", None)
+            if callable(trusted) and not trusted():
+                self._window.show_raised()
+                self._window.set_status(
+                    "选区问答需要辅助功能权限：系统设置 → 隐私与安全性 → 辅助功能",
+                    error=True,
+                )
+                return
         self._abort_clipboard_pending()
         self._invalidate_inflight()
         self._question_capture_state = "waiting_release"
@@ -566,8 +644,18 @@ class AppController(QObject):
             )
             self._question_capture_state = "waiting_clipboard"
             if not self._selection_input.send_copy():
-                self._fail_question_selection_capture("无法发送复制快捷键")
-            return
+                message = "无法发送复制快捷键"
+                if sys.platform == "darwin":
+                    trusted = getattr(
+                        self._selection_input, "accessibility_trusted", None
+                    )
+                    if callable(trusted) and not trusted():
+                        message = (
+                            "选区问答需要辅助功能权限："
+                            "系统设置 → 隐私与安全性 → 辅助功能"
+                        )
+                self._fail_question_selection_capture(message)
+                return
 
         if (
             self._selection_input.clipboard_sequence()
@@ -614,6 +702,26 @@ class AppController(QObject):
         self._question_hotkey_error = ""
         return True, ""
 
+    def apply_manual_input_hotkey(self, hotkey: str) -> tuple[bool, str]:
+        old_hotkey = self._cfg.manual_input.hotkey
+        registered, error = self._manual_input_hotkey_manager.rebind(hotkey)
+        if not registered:
+            return False, error
+        try:
+            save_manual_input_hotkey(self._manual_input_hotkey_manager.shortcut)
+        except Exception as exc:  # noqa: BLE001
+            self._manual_input_hotkey_manager.rebind(old_hotkey)
+            return False, f"保存手动输入快捷键失败：{exc}"
+        self._cfg = replace(
+            self._cfg,
+            manual_input=replace(
+                self._cfg.manual_input,
+                hotkey=self._manual_input_hotkey_manager.shortcut,
+            ),
+        )
+        self._manual_input_hotkey_error = ""
+        return True, ""
+
     @Slot()
     def clear_answer_context(self) -> None:
         self._invalidate_inflight()
@@ -642,7 +750,9 @@ class AppController(QObject):
             llm=self._cfg.llm,
             bridge=self._cfg.bridge,
             question_hotkey=self._cfg.app.question_hotkey,
+            manual_input_hotkey=self._cfg.manual_input.hotkey,
             question_hotkey_applier=self.apply_question_hotkey,
+            manual_input_hotkey_applier=self.apply_manual_input_hotkey,
             parent=self._window,
         )
         self._settings_dialog = dialog
@@ -1411,7 +1521,9 @@ def main() -> int:
         QMessageBox.critical(None, "配置错误", str(exc))
         return 1
 
-    if is_frozen():
+    # Windows frozen: register NM host. macOS: clear any leftover NM manifests
+    # (auto-pair uses HTTP /v1/auto_pair to avoid Gatekeeper on NmHost).
+    if is_frozen() or sys.platform == "darwin":
         try:
             register_native_messaging_host()
         except Exception:  # noqa: BLE001

@@ -26,7 +26,7 @@ function setHint(mode: "offline" | "unpaired" | "auto" | "code" | "nm-missing"):
     return;
   }
   if (mode === "auto") {
-    hintEl.innerHTML = "已通过 Native Messaging 自动连接桌面端。打开 YouTube 并开启字幕即可使用。";
+    hintEl.innerHTML = "已自动连接桌面端。打开 YouTube 并开启字幕即可使用。";
     return;
   }
   if (mode === "code") {
@@ -35,7 +35,7 @@ function setHint(mode: "offline" | "unpaired" | "auto" | "code" | "nm-missing"):
   }
   if (mode === "nm-missing") {
     hintEl.innerHTML =
-      "未检测到自动配对通道。请确认已安装桌面端（Setup 或含 NmHost 的包），或在桌面端点「开始配对」后在此输入 6 位码。";
+      "自动连接失败。请确认桌面端已启动并启用本机桥接，或在桌面端点「开始配对」后在此输入 6 位码。";
     return;
   }
   hintEl.innerHTML =
@@ -53,13 +53,13 @@ async function refreshStatus(): Promise<void> {
   }
   if (resp.paired) {
     const via =
-      resp.pairSource === "native"
+      resp.pairSource === "native" || resp.pairSource === "http"
         ? "自动连接"
         : resp.pairSource === "code"
           ? "短码配对"
           : "已连接";
     statusEl.innerHTML = `<span class="ok">${via}</span> · 端口 ${resp.port ?? portEl.value}`;
-    setHint(resp.pairSource === "native" ? "auto" : "code");
+    setHint(resp.pairSource === "code" ? "code" : "auto");
     return;
   }
   statusEl.innerHTML = `<span class="bad">桌面在线，尚未配对</span> · 端口 ${resp.port ?? portEl.value}`;

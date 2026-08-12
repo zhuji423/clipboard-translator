@@ -8,6 +8,71 @@
 
 - 文档与计划统一迁入 `docs/`：设计说明、历史计划归档、未做功能目录 `docs/todo/` 与「版本↔计划↔完成工作」对照表；根目录不再放置 `PLAN-*.md`
 
+## [0.17.1] - 2026-08-12
+
+### Fixed
+
+- macOS 自动连接改为优先走本机 HTTP `/v1/auto_pair`，不再启动 Python NmHost，避免 Gatekeeper 反复拦截 `libpython` 要求「仍然允许」
+
+### Changed
+
+- macOS 发布包不再附带 `ClipboardTranslatorNmHost`；启动时清理已注册的 Native Messaging 清单
+- 浏览器扩展版本同步至 `0.17.1`；自动配对顺序为 HTTP → Native Messaging → 短码
+
+## [0.17.0] - 2026-08-12
+
+### Added
+
+- macOS 支持 Native Messaging 零点击自动配对：启动时向 Edge/Chrome 注册 host；发布包在 `.app` 内附带 `ClipboardTranslatorNmHost`；开发模式也可写 launcher 自动连接
+- 打包后对本机未公证包做 ad-hoc 签名，避免 Gatekeeper 拦截 NmHost / `libpython` 导致自动连接失败
+
+### Changed
+
+- 短码配对仍作兜底；Mac 上不必每次手动输入 6 位码（需至少启动一次桌面端以完成注册）
+
+## [0.16.1] - 2026-08-12
+
+### Fixed
+
+- YouTube 键盘模式下短按 `Space` 关闭 tip 后改为放行空格给播放器，避免自行 `play()` 导致需长按才能流畅续播
+
+## [0.16.0] - 2026-08-12
+
+### Added
+
+- YouTube 键盘选词翻译短语时，在字幕旁弹层显示译文，不再抢桌面翻译窗焦点，便于边看课边读译文
+
+### Fixed
+
+- 键盘模式下按一次 `Space` 即可关闭译文/查词弹层并恢复播放（此前短语走桌面窗会抢走焦点导致空格无效）
+
+### Changed
+
+- 鼠标拖选短语仍唤起桌面翻译窗；仅键盘路径改为页内译文
+- 浏览器扩展版本同步至 `0.16.0`
+
+## [0.15.0] - 2026-08-12
+
+### Added
+
+- YouTube 字幕：按 `Space` 暂停后自动高亮当前句末词，可用方向键移动、`Shift+方向键` 扩选，`Enter` 查单词或翻译短语，形成纯键盘闭环
+
+### Changed
+
+- 浏览器扩展版本同步至 `0.15.0`（需重新加载扩展以启用键盘选词）
+
+## [0.14.0] - 2026-08-12
+
+### Added
+
+- macOS 支持全局选区问答与手动输入快捷键（Carbon 注册；选区复制需辅助功能权限）
+- 设置页新增「手动输入」快捷键，Windows / macOS 均可改绑并立即生效
+
+### Changed
+
+- macOS 默认快捷键改为 `Alt+Shift+Q`（选区问答）与 `Alt+M`（手动输入），避开系统注销/最小化与常见 Ctrl 冲突；Windows 默认仍为 `Ctrl+Shift+Q` / `Ctrl+M`
+- 配置字符串在 macOS 上明确：`Ctrl`=Control（⌃），`Cmd`=Command（⌘）
+
 ## [0.13.0] - 2026-08-11
 
 ### Added

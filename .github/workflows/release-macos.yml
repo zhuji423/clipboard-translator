@@ -55,6 +55,10 @@ jobs:
         shell: bash
         run: |
           python -m PyInstaller --noconfirm --clean clipboard_translator_macos.spec
+          APP="dist/Clipboard Translator.app"
+          test -d "$APP"
+          xattr -cr "$APP" 2>/dev/null || true
+          codesign --force --deep --sign - "$APP"
 
       - name: Verify bundled native speech engine
         shell: bash
@@ -62,6 +66,7 @@ jobs:
           set -euo pipefail
           APP="dist/Clipboard Translator.app"
           test -d "$APP"
+          test ! -e "$APP/Contents/MacOS/ClipboardTranslatorNmHost"
           find "$APP" -path '*texttospeech*' -type f | grep -q .
 
       - name: Stage zip artifact
