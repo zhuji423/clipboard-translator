@@ -69,15 +69,57 @@ def test_speech_service_prefers_us_voice_and_toggles_playback() -> None:
     assert changes == [True, False]
 
 
+def test_speech_service_switches_to_chinese_voice_for_han_text() -> None:
+    fake = _FakeSpeech(
+        [
+            QLocale(QLocale.Language.English, QLocale.Country.UnitedStates),
+            QLocale(QLocale.Language.Chinese, QLocale.Country.China),
+        ]
+    )
+    service = SpeechService(engine=fake)
+    errors: list[str] = []
+    service.error_occurred.connect(errors.append)
+
+    assert service.available is True
+    assert service.speak("Hello") is True
+    assert fake.locale is not None
+    assert fake.locale.name() == "en_US"
+    assert fake.spoken == ["Hello"]
+
+    assert service.speak("你好世界") is True
+    assert fake.locale.name() == "zh_CN"
+    assert fake.spoken[-1] == "你好世界"
+
+    assert service.speak("Hello 你好") is True
+    assert fake.locale.name() == "zh_CN"
+    assert fake.spoken[-1] == "Hello 你好"
+    assert errors == []
+
+
 def test_speech_service_reports_missing_english_voice() -> None:
     fake = _FakeSpeech([QLocale(QLocale.Language.Chinese)])
     service = SpeechService(engine=fake)
     errors: list[str] = []
     service.error_occurred.connect(errors.append)
 
-    assert service.available is False
+    assert service.available is True
     assert service.speak("Hello") is False
+    assert fake.spoken == []
     assert errors == ["未找到可用的系统英语语音"]
+
+
+def test_speech_service_reports_missing_chinese_voice() -> None:
+    fake = _FakeSpeech(
+        [QLocale(QLocale.Language.English, QLocale.Country.UnitedStates)]
+    )
+    service = SpeechService(engine=fake)
+    errors: list[str] = []
+    service.error_occurred.connect(errors.append)
+
+    assert service.available is True
+    assert service.speak("你好世界") is False
+    assert fake.spoken == []
+    assert errors == ["未找到可用的系统中文语音"]
 
 
 def test_source_speaker_button_tracks_text_and_mode() -> None:
