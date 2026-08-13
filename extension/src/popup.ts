@@ -26,11 +26,11 @@ function setHint(mode: "offline" | "unpaired" | "auto" | "code" | "nm-missing"):
     return;
   }
   if (mode === "auto") {
-    hintEl.innerHTML = "已自动连接桌面端。打开 YouTube 并开启字幕即可使用。";
+    hintEl.innerHTML = "已自动连接桌面端。网页双击英文词，或打开 YouTube 字幕即可使用。";
     return;
   }
   if (mode === "code") {
-    hintEl.innerHTML = "已通过短码配对连接。打开 YouTube 并开启字幕即可使用。";
+    hintEl.innerHTML = "已通过短码配对连接。网页双击英文词，或打开 YouTube 字幕即可使用。";
     return;
   }
   if (mode === "nm-missing") {

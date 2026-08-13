@@ -25,3 +25,7 @@ class LruCache:
             self._data[key] = value
             while len(self._data) > self._capacity:
                 self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()

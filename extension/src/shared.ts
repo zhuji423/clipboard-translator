@@ -25,7 +25,16 @@ export type LookupRequest = {
   word: string;
   context: string;
   requestId: string;
+  source?: "web" | "youtube";
 };
+
+export type WordPart = {
+  part: string;
+  type: "prefix" | "root" | "suffix" | "base" | "other";
+  meaning: string;
+};
+
+export type LookupSource = { name: string; url: string };
 
 export type LookupResponse = {
   type: "LOOKUP_RESULT";
@@ -35,8 +44,15 @@ export type LookupResponse = {
   word?: string;
   lemma?: string;
   pos?: string;
+  phonetic?: string;
   gloss?: string;
   meaning_in_context?: string;
+  word_parts?: WordPart[];
+  etymology?: string;
+  mnemonic?: string;
+  mnemonic_kind?: "evidence_based" | "associative";
+  sources?: LookupSource[];
+  warnings?: string[];
 };
 
 export type HealthRequest = { type: "HEALTH" };

@@ -52,7 +52,7 @@ api_key = "sk-xxx"
 model = "your-model"
 ```
 
-也可在运行后打开「设置」填写 API URL、API Key 与模型名，并修改选区问答 / 手动输入全局快捷键（保存后立即生效）。
+也可在运行后打开「设置」填写 API URL、API Key 与模型名，并修改选区问答 / 手动输入全局快捷键（保存后立即生效）。可选的 Merriam-Webster Key 只用于个人 / 非商业词源增强；留空即使用免费词典与 Wiktionary。
 
 ## 运行
 
@@ -85,9 +85,9 @@ chmod +x scripts/build_macos.sh
 
 产物：`dist/Clipboard Translator.app` 与 `dist/macos/ClipboardTranslator-*-macos.zip`。说明见 [`docs/plans/design/macos-release.md`](docs/plans/design/macos-release.md)。
 
-## YouTube 字幕点词与划词翻译（浏览器扩展）
+## 网页与 YouTube 查词（浏览器扩展）
 
-桌面端负责 LLM 与密钥；**Edge** 扩展只负责字幕交互与本机配对。协议见 [`docs/plans/design/browser-bridge.md`](docs/plans/design/browser-bridge.md)；划词原理与版本演进见 [`docs/guides/youtube-subtitle-phrase-translate.md`](docs/guides/youtube-subtitle-phrase-translate.md)。
+桌面端负责词典、LLM 与密钥；**Edge** 扩展只负责页面交互与本机配对。普通网页双击一个英文单词会显示音标、语境义、构词 / 词源、助记和来源；只发送当前词与所在句（最多 500 字符），输入框与可编辑区域不触发。协议见 [`docs/plans/design/browser-bridge.md`](docs/plans/design/browser-bridge.md)；YouTube 划词原理见 [`docs/guides/youtube-subtitle-phrase-translate.md`](docs/guides/youtube-subtitle-phrase-translate.md)。
 
 ### 效果（你想要的「选中即译」）
 
@@ -96,7 +96,7 @@ chmod +x scripts/build_macos.sh
 | 操作 | 结果 |
 |------|------|
 | **拖选**一段字幕（按住拖过多个词，松手） | 原文写入系统剪贴板（尽力而为），并经本机桥接 `POST /v1/translate` **立刻**唤起桌面翻译窗流式翻译 |
-| **单击**单个单词 | 暂停视频，页内弹层显示语境释义（`/v1/lookup`）；关闭弹层后按需恢复播放 |
+| **单击**单个单词 | 暂停视频，页内弹层显示音标、语境义、构词 / 词源、助记与来源（`/v1/lookup`）；关闭弹层后按需恢复播放 |
 | **`Space` 暂停**后 | 自动高亮当前句最后一个词；`←`/`→` 逐词移动，`Shift+←/→` 扩选或收缩；`Enter` 对单词查义、对短语在**字幕旁 tip 显示译文**（不抢桌面窗）；`Esc` 退出键盘模式（保持暂停），再按 `Space` 关闭 tip 并恢复播放 |
 
 翻译**不依赖**「浏览器剪贴板变化是否被 Qt 听到」：复制是同步剪贴板，触发翻译以桥接为准。拖选过程使用 pointer capture + 自绘高亮，播放中控制栏弹出也不易丢手势；原文在桌面侧会折叠为单行。扩展会记录同视频实际经过的前 5 条字幕作为翻译语境；切视频、拖动进度或闲置超过 5 分钟会自动清空。
@@ -106,7 +106,7 @@ chmod +x scripts/build_macos.sh
 1. 安装并运行 Windows **Setup**（或便携版 + 同目录 NmHost）  
 2. 用 **Microsoft Edge** 按引导页安装扩展（Edge Add-ons 上架后为一键获取；上架前引导页会说明过渡方式）  
 3. 扩展一般会 **自动配对** 桌面端；失败时在桌面 **设置 → 开始配对**，扩展弹窗输入 6 位码  
-4. 打开 YouTube、**开启字幕**，在扩展字幕条上拖选、单击，或 `Space` 暂停后用方向键选词即可  
+4. 普通网页双击英文词即可查词；YouTube **开启字幕**后可在扩展字幕条上拖选、单击，或 `Space` 暂停后用方向键选词
 
 桌面端也可随时用 **设置 / 托盘 → 安装浏览器扩展** 打开引导页。本机桥接默认启用；密钥始终留在桌面端。
 
@@ -121,7 +121,7 @@ Edge → `edge://extensions` → 打开「开发人员模式」→「加载解�
 
 从 Release 下载的 `ClipboardTranslator-extension-*.zip` 解压后加载该目录（须含 `manifest.json`）仅作过渡。改完扩展源码后需重新构建并在扩展管理页「重新加载」，再刷新 YouTube；桌面桥接相关改动需重启 `main.py`。
 
-说明：首版仅 YouTube；B 站适配后续再加。
+说明：通用网页查词支持普通 HTTP/HTTPS 页面；浏览器内部页、扩展页与可编辑控件不支持。B 站字幕适配后续再加。
 
 ### 文档索引
 
@@ -145,7 +145,7 @@ Edge → `edge://extensions` → 打开「开发人员模式」→「加载解�
 - 普通复制翻译使用最近 5 分钟内的前 5 条原文作为显式语境；单条最多约 500 Token、总计约 2000 Token，只存内存且可随时清空
 - LLM `stream=true`，首 token 上屏
 - `requests.Session` 长连接 + LRU 缓存 + 新复制抢占旧任务（含缓存命中）
-- 网页 / 桌面软件 / Steam 等凡是走系统剪切板的来源均可；YouTube 字幕划词另走本机桥接直达（见上节）；暂停后可用方向键纯键盘查词/译短语
+- 网页可直接双击英文词查义；桌面软件 / Steam 等仍可走系统剪切板；YouTube 字幕划词另走本机桥接直达（见上节）
 - 语音误触已用确认窗抑制；仍冲突时可用托盘「暂停监听」
 - 状态栏下方展示今日已用（本机估算）与 DeepSeek 账户剩余余额；设计见 [`docs/plans/design/billing-balance.md`](docs/plans/design/billing-balance.md)
-- 可选浏览器桥接：点词查义写入历史时标记为 `youtube_word_lookup`；划词整段翻译走与剪贴板相同的主窗翻译路径
+- 可选浏览器桥接：网页 / YouTube 查词分别标记为 `web_word_lookup` / `youtube_word_lookup`；划词整段翻译走与剪贴板相同的主窗翻译路径

@@ -16,3 +16,4 @@ async function runBundledTest(entryPoint) {
 
 await runBundledTest("src/subtitle_context.test.ts");
 await runBundledTest("src/word_selection.test.ts");
+await runBundledTest("src/web_lookup.test.ts");

@@ -65,7 +65,11 @@ gh api repos/zhuji423/clipboard-translator/pages -X PUT `
 1. 注册 [Edge Add-ons Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/overview)
 2. 新建扩展 → 上传上面的 **edge-store.zip**
 3. 可见性选 **Hidden / Unlisted**（仅链接可装）
-4. 隐私：仅连接本机 `127.0.0.1`、不收集用户数据、需配套桌面应用；权限写清 `storage` / `nativeMessaging` / YouTube / localhost
+4. 隐私与权限说明应写清：
+   - `storage`：在浏览器本地保存桥接端口、令牌和用户设置。
+   - `nativeMessaging` / `http://127.0.0.1/*`：仅用于发现并连接配套桌面应用，词典与 LLM Key 不返回扩展。
+   - `http://*/*` / `https://*/*`：支持在普通网页主动双击英文单词查词，以及 YouTube 字幕点词 / 划词；普通网页不常驻读取或上传整页，只在用户双击后发送所选单词和最多 500 字符的当前句，且排除输入框和可编辑区域。
+   - 扩展不收集用户数据；网页语境仅传到用户本机桌面端，再由用户配置的数据源处理。
 5. 提交审核；通过后记下 **商品 URL** 与 **扩展 ID**
 
 ## 上架后改仓库

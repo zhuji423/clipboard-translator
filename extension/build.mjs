@@ -24,6 +24,7 @@ await esbuild.build({
   entryPoints: {
     background: join(root, "src/background.ts"),
     content: join(root, "src/content.ts"),
+    web_content: join(root, "src/web_content.ts"),
     popup: join(root, "src/popup.ts"),
   },
   outdir: dist,
@@ -42,7 +43,7 @@ const manifest = {
   name: "Clipboard Translator Subtitles",
   version: pkg.version,
   description:
-    "Click YouTube subtitle words to look them up via the local Clipboard Translator desktop app.",
+    "Look up English words on web pages and YouTube subtitles via the local Clipboard Translator desktop app.",
   // Pins extension ID for unpacked / pre-store builds (must match distribution.py).
   key: EXTENSION_PUBLIC_KEY_B64,
   action: {
@@ -53,7 +54,7 @@ const manifest = {
     service_worker: "background.js",
   },
   permissions: ["storage", "nativeMessaging"],
-  host_permissions: ["http://127.0.0.1/*", "https://www.youtube.com/*"],
+  host_permissions: ["http://127.0.0.1/*", "http://*/*", "https://*/*"],
   externally_connectable: {
     matches: ["https://zhuji423.github.io/*"],
   },
@@ -62,6 +63,12 @@ const manifest = {
       matches: ["https://www.youtube.com/*", "https://youtube.com/*"],
       js: ["content.js"],
       css: ["content.css"],
+      run_at: "document_idle",
+    },
+    {
+      matches: ["http://*/*", "https://*/*"],
+      exclude_matches: ["https://www.youtube.com/*", "https://youtube.com/*"],
+      js: ["web_content.js"],
       run_at: "document_idle",
     },
   ],

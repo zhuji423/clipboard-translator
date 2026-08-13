@@ -28,7 +28,7 @@ def _request(method: str, url: str, data: dict | None = None, headers: dict | No
 
 def test_bridge_health_pair_lookup_and_auth() -> None:
     state = {"token": "", "enabled": True, "port": 17991}
-    lookups: list[tuple[str, str, str]] = []
+    lookups: list[tuple[str, str, str, str]] = []
     translates: list[TranslationRequest] = []
 
     def provider() -> BridgeConfig:
@@ -37,8 +37,8 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
     def on_token(token: str) -> None:
         state["token"] = token
 
-    def on_lookup(word: str, context: str, target_lang: str) -> dict:
-        lookups.append((word, context, target_lang))
+    def on_lookup(word: str, context: str, target_lang: str, source: str) -> dict:
+        lookups.append((word, context, target_lang, source))
         return {
             "word": word,
             "lemma": word,
@@ -97,7 +97,25 @@ def test_bridge_health_pair_lookup_and_auth() -> None:
         )
         assert status == 200
         assert ok["meaning_in_context"] == "语境测试"
-        assert lookups == [("hello", "hello world", "zh")]
+        assert lookups == [("hello", "hello world", "zh", "youtube")]
+
+        status, web = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/lookup",
+            {"word": "issue", "context": "This is an issue.", "source": "web"},
+            headers={"Authorization": f"Bearer {state['token']}"},
+        )
+        assert status == 200
+        assert web["ok"] is True
+        assert lookups[-1] == ("issue", "This is an issue.", "zh", "web")
+
+        status, invalid_source = _request(
+            "POST",
+            f"http://127.0.0.1:{state['port']}/v1/lookup",
+            {"word": "issue", "source": "desktop"},
+            headers={"Authorization": f"Bearer {state['token']}"},
+        )
+        assert status == 400
 
         status, translated = _request(
             "POST",

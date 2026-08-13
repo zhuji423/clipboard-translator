@@ -41,6 +41,11 @@ class BridgeSettings:
 
 
 @dataclass(frozen=True)
+class DictionarySettings:
+    merriam_webster_api_key: str = ""
+
+
+@dataclass(frozen=True)
 class ManualInputSettings:
     hotkey: str = "Ctrl+M"
     x: int | None = None
@@ -55,6 +60,7 @@ class Config:
     llm: LlmConfig
     app: AppConfig
     bridge: BridgeSettings = BridgeSettings()
+    dictionary: DictionarySettings = DictionarySettings()
     manual_input: ManualInputSettings = ManualInputSettings()
 
 
@@ -75,6 +81,7 @@ def load_config(path: Path | None = None) -> Config:
     llm_raw = raw.get("llm") or {}
     app_raw = raw.get("app") or {}
     bridge_raw = raw.get("bridge") or {}
+    dictionary_raw = raw.get("dictionary") or {}
     manual_raw = raw.get("manual_input") or {}
 
     base_url = str(llm_raw.get("base_url", "")).rstrip("/")
@@ -111,6 +118,11 @@ def load_config(path: Path | None = None) -> Config:
             enabled=bool(bridge_raw.get("enabled", True)),
             port=port,
             token=str(bridge_raw.get("token", "")),
+        ),
+        dictionary=DictionarySettings(
+            merriam_webster_api_key=str(
+                dictionary_raw.get("merriam_webster_api_key", "")
+            ).strip(),
         ),
         manual_input=ManualInputSettings(
             hotkey=str(
@@ -282,6 +294,21 @@ def save_bridge_token(token: str, path: Path | None = None) -> None:
     cfg_path = path or config_path()
     text = cfg_path.read_text(encoding="utf-8")
     text = _upsert_toml_string(text, "token", token, "bridge")
+    cfg_path.write_text(text, encoding="utf-8")
+
+
+def save_dictionary_settings(
+    merriam_webster_api_key: str,
+    path: Path | None = None,
+) -> None:
+    cfg_path = path or config_path()
+    text = cfg_path.read_text(encoding="utf-8")
+    text = _upsert_toml_string(
+        text,
+        "merriam_webster_api_key",
+        merriam_webster_api_key.strip(),
+        "dictionary",
+    )
     cfg_path.write_text(text, encoding="utf-8")
 
 

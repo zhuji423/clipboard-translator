@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from browser_bridge import DEFAULT_BRIDGE_PORT
-from config import BridgeSettings, LlmConfig
+from config import BridgeSettings, DictionarySettings, LlmConfig
 from distribution import preferred_extension_install_url
 from global_hotkey import (
     config_hotkey_to_qt_portable,
@@ -50,10 +50,16 @@ class BridgeSettingsValues:
     port: int
 
 
+@dataclass(frozen=True)
+class DictionarySettingsValues:
+    merriam_webster_api_key: str
+
+
 class SettingsDialog(QDialog):
     font_size_changed = Signal(int)
     llm_settings_changed = Signal(object)  # LlmSettingsValues
     bridge_settings_changed = Signal(object)  # BridgeSettingsValues
+    dictionary_settings_changed = Signal(object)  # DictionarySettingsValues
     check_updates_requested = Signal()
     start_pairing_requested = Signal()
     revoke_pairing_requested = Signal()
@@ -63,6 +69,7 @@ class SettingsDialog(QDialog):
         font_size: int = 12,
         llm: LlmConfig | None = None,
         bridge: BridgeSettings | None = None,
+        dictionary: DictionarySettings | None = None,
         question_hotkey: str = "",
         manual_input_hotkey: str = "",
         question_hotkey_applier: Callable[[str], tuple[bool, str]] | None = None,
@@ -81,6 +88,7 @@ class SettingsDialog(QDialog):
 
         llm = llm or LlmConfig(base_url="", api_key="", model="")
         bridge = bridge or BridgeSettings()
+        dictionary = dictionary or DictionarySettings()
         question_hotkey = question_hotkey or default_question_hotkey()
         manual_input_hotkey = manual_input_hotkey or default_manual_input_hotkey()
 
@@ -108,6 +116,17 @@ class SettingsDialog(QDialog):
         self.model_edit.setPlaceholderText("模型名")
         form.addRow("模型名", self.model_edit)
         layout.addLayout(form)
+
+        dictionary_form = QFormLayout()
+        dictionary_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.mw_key_edit = QLineEdit(dictionary.merriam_webster_api_key)
+        self.mw_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.mw_key_edit.setPlaceholderText("可选，留空使用 Wiktionary")
+        self.mw_key_edit.setToolTip(
+            "Merriam-Webster 个人 / 非商业 API Key；仅保存在桌面端"
+        )
+        dictionary_form.addRow("MW 词典 Key", self.mw_key_edit)
+        layout.addLayout(dictionary_form)
 
         layout.addWidget(QLabel("快捷操作"))
         shortcut_form = QFormLayout()
@@ -144,7 +163,7 @@ class SettingsDialog(QDialog):
             shortcut_form.addRow("", platform_note)
         layout.addLayout(shortcut_form)
 
-        layout.addWidget(QLabel("浏览器集成（YouTube 字幕点词）"))
+        layout.addWidget(QLabel("浏览器集成（网页 / YouTube 查词）"))
         bridge_form = QFormLayout()
         bridge_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.bridge_enabled = QCheckBox("启用本机桥接（仅 127.0.0.1）")
@@ -327,6 +346,11 @@ class SettingsDialog(QDialog):
             BridgeSettingsValues(
                 enabled=self.bridge_enabled.isChecked(),
                 port=self.bridge_port.value(),
+            )
+        )
+        self.dictionary_settings_changed.emit(
+            DictionarySettingsValues(
+                merriam_webster_api_key=self.mw_key_edit.text().strip(),
             )
         )
         self.font_size_changed.emit(self.spin.value())

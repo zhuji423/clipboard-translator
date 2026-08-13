@@ -171,6 +171,7 @@ overlay.mountClickHandler(({ word, context, anchor }) => {
       word,
       context,
       requestId,
+      source: "youtube",
     },
     (response: LookupResponse | undefined) => {
       if (chrome.runtime.lastError) {
