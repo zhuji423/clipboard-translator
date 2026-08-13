@@ -73,6 +73,7 @@
       <p class="lead">
         请使用 <strong>Microsoft Edge</strong>。保持 Clipboard Translator 运行，
         再从 Edge 加载项商店添加扩展（需点一次「获取」确认）。安装后可自动与桌面配对。
+        配对后可在普通网页双击英文单词查词，也可使用 YouTube 字幕点词与划词翻译。
         本产品不上架 Chrome 网上应用店。
       </p>
 
@@ -144,7 +145,7 @@
         if (data.paired) {
           dot.className = "dot ok";
           statusText.textContent = "桌面端在线 · 已配对";
-          detail.textContent = `端口 ${data.port ?? DEFAULT_PORT}。扩展安装后即可使用 YouTube 字幕点词 / 划词。`;
+          detail.textContent = `端口 ${data.port ?? DEFAULT_PORT}。扩展安装后即可使用普通网页双击查词，以及 YouTube 字幕点词 / 划词。`;
         } else {
           dot.className = "dot warn";
           statusText.textContent = "桌面端在线 · 尚未配对";

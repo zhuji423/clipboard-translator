@@ -30,13 +30,13 @@
       <h1>Privacy Policy</h1>
       <p class="muted">
         Clipboard Translator Subtitles (Microsoft Edge extension)<br />
-        Last updated: 2026-08-09
+        Last updated: 2026-08-13
       </p>
 
       <h2>Summary</h2>
       <p>
-        This extension helps you look up words and translate short phrases from
-        <strong>YouTube subtitles</strong>. It works together with the optional
+        This extension helps you look up English words on ordinary web pages and
+        look up or translate text from <strong>YouTube subtitles</strong>. It works together with the optional
         open-source desktop app
         <a href="https://github.com/zhuji423/clipboard-translator">Clipboard Translator</a>
         installed on the same computer. The extension does
@@ -47,9 +47,11 @@
       <h2>Data the extension accesses</h2>
       <ul>
         <li>
-          <strong>Website content (YouTube subtitles):</strong> when you use the
-          feature, the extension reads the active subtitle line on the YouTube
-          page and the word or short phrase you explicitly click or select.
+          <strong>Website content:</strong> on ordinary pages, the extension acts
+          only after you double-click a single English word and reads that word
+          plus its containing sentence (limited to 500 characters). On YouTube,
+          it reads the active subtitle line and the word or phrase you explicitly
+          click or select. Editable fields are excluded from web lookup.
         </li>
         <li>
           <strong>Local settings:</strong> preference values such as feature
@@ -60,24 +62,26 @@
 
       <h2>How that data is used</h2>
       <p>
-        Selected subtitle text is sent only to the
+        The selected word and sentence or selected subtitle text is sent first to the
         <strong>Clipboard Translator desktop app on your machine</strong>
         (loopback HTTP to <code>127.0.0.1</code>, and optionally native messaging
         to obtain local bridge credentials). The desktop app performs lookup or
         translation using the API endpoint and API key that
         <strong>you</strong> configure. The extension package itself does not
-        call cloud AI APIs and does not upload subtitle text to the developer.
+        call cloud AI APIs and does not upload page text to the developer. The
+        desktop app may query FreeDictionaryAPI, Wikimedia/Wiktionary, and, only
+        when you configure a key, Merriam-Webster to obtain dictionary facts.
       </p>
 
       <h2>What we do not collect</h2>
       <ul>
         <li>Name, email, address, age, or other contact details</li>
         <li>Health, financial, or payment data</li>
-        <li>Passwords or account credentials for YouTube / Google / Microsoft</li>
+        <li>Passwords or account credentials for websites, YouTube, Google, or Microsoft</li>
         <li>Emails, chats, or personal communications</li>
         <li>Precise location or GPS</li>
         <li>Full browsing history for advertising or analytics</li>
-        <li>Keystroke logging or background activity monitoring unrelated to the subtitle feature</li>
+        <li>Keystroke logging or full-page/background reading unrelated to an explicit lookup</li>
       </ul>
 
       <h2>Sharing and selling</h2>

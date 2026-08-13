@@ -61,7 +61,7 @@ async function handleMessage(message: ExtensionMessage): Promise<ExtensionMessag
     return tryAutoPair();
   }
   if (message.type === "LOOKUP") {
-    return lookup(message.word, message.context, message.requestId);
+    return lookup(message.word, message.context, message.requestId, message.source);
   }
   if (message.type === "TRANSLATE") {
     return translate(
@@ -265,6 +265,7 @@ async function lookup(
   word: string,
   context: string,
   requestId: string,
+  source: "web" | "youtube" = "youtube",
 ): Promise<LookupResponse> {
   const settings = await loadSettings();
   if (!settings.enabled) {
@@ -306,6 +307,7 @@ async function lookup(
         word,
         context,
         target_lang: latest.targetLang,
+        source,
       }),
       signal: AbortSignal.timeout(45000),
     });
@@ -325,8 +327,22 @@ async function lookup(
       word: String(data.word || word),
       lemma: String(data.lemma || ""),
       pos: String(data.pos || ""),
+      phonetic: String(data.phonetic || ""),
       gloss: String(data.gloss || ""),
       meaning_in_context: String(data.meaning_in_context || ""),
+      word_parts: Array.isArray(data.word_parts)
+        ? (data.word_parts as LookupResponse["word_parts"])
+        : [],
+      etymology: String(data.etymology || ""),
+      mnemonic: String(data.mnemonic || ""),
+      mnemonic_kind:
+        data.mnemonic_kind === "evidence_based" ? "evidence_based" : "associative",
+      sources: Array.isArray(data.sources)
+        ? (data.sources as LookupResponse["sources"])
+        : [],
+      warnings: Array.isArray(data.warnings)
+        ? data.warnings.map(String)
+        : [],
     };
   } catch {
     return {

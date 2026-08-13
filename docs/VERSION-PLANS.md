@@ -259,6 +259,20 @@
 | 编写/使用的计划 | [`macos-http-auto-pair`](plans/history/macos-http-auto-pair.md)（设计：[design/browser-bridge](plans/design/browser-bridge.md)、[design/macos-release](plans/design/macos-release.md)） |
 | 完成工作 | `POST /v1/auto_pair`；扩展 HTTP 优先自动配对；Mac 停用 NmHost / 清理 NM 清单，避开 Gatekeeper |
 
+### 0.17.2
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`source-speech-locale-switch`](plans/history/source-speech-locale-switch.md) |
+| 完成工作 | 原文含汉字时改用系统中文语音；纯英文仍走 en-US/en-GB；缺对应音色时提示、不跨语言回退 |
+
+### 0.18.0
+
+| 项 | 内容 |
+|----|------|
+| 编写/使用的计划 | [`browser-vocabulary-learning`](plans/history/browser-vocabulary-learning.md)（设计：[design/browser-bridge](plans/design/browser-bridge.md)） |
+| 完成工作 | 普通网页双击英文词查义；YouTube 查词同步增加音标、系统朗读、构词、词源、助记和来源；FreeDictionaryAPI + Wiktionary 默认可用，Merriam-Webster Key 可选增强；无证据时禁止猜词根 |
+
 ---
 
 ## 未完成 / 暂停（todo）

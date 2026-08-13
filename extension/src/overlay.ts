@@ -1,5 +1,6 @@
 import { tokenizeSubtitle } from "./tokenize";
 import { WordSelectionState } from "./word_selection";
+import type { LookupResponse } from "./shared";
 
 export type WordClickPayload = {
   word: string;
@@ -186,6 +187,24 @@ export class SubtitleOverlay {
           flex: 1 1 auto;
           min-height: 0;
         }
+        .lookup-section { margin: 0 0 8px; }
+        .lookup-label {
+          display: block;
+          color: #9aa0a6;
+          font-size: 11px;
+          margin-bottom: 2px;
+        }
+        .lookup-parts { display: flex; flex-wrap: wrap; gap: 5px; }
+        .lookup-part {
+          border: 1px solid #4b5059;
+          border-radius: 4px;
+          padding: 2px 5px;
+          background: #292b30;
+        }
+        .lookup-sources { display: flex; flex-wrap: wrap; gap: 8px; }
+        .lookup-sources a { color: #8ab4f8; text-decoration: none; }
+        .lookup-sources a:hover { text-decoration: underline; }
+        .lookup-warning { color: #f6c177; font-size: 12px; }
         .tip-actions {
           margin-top: 4px;
           padding: 8px 12px 10px;
@@ -255,6 +274,8 @@ export class SubtitleOverlay {
       if (target?.dataset?.action === "close") {
         this.hideTip();
         this.onCloseTip?.();
+      } else if (target?.dataset?.action === "speak") {
+        this.toggleSpeech(target.dataset.word || "", target as HTMLButtonElement);
       }
     });
 
@@ -283,6 +304,7 @@ export class SubtitleOverlay {
     this.toastEl.textContent = message;
     this.toastEl.classList.add("visible");
     if (this.toastTimer) window.clearTimeout(this.toastTimer);
+    window.speechSynthesis?.cancel();
     this.toastTimer = window.setTimeout(() => {
       this.toastEl?.classList.remove("visible");
       this.toastTimer = 0;
@@ -661,9 +683,9 @@ export class SubtitleOverlay {
   showResult(
     anchor: DOMRect,
     word: string,
-    data: { lemma?: string; pos?: string; gloss?: string; meaning_in_context?: string },
+    data: LookupResponse,
   ): void {
-    const meta = [data.lemma, data.pos].filter(Boolean).join(" · ");
+    const meta = [data.phonetic, data.lemma, data.pos].filter(Boolean).join(" · ");
     const body = data.meaning_in_context || data.gloss || "（无释义）";
     const gloss =
       data.gloss && data.gloss !== body ? `词典：${data.gloss}` : "";
@@ -675,6 +697,8 @@ export class SubtitleOverlay {
       closeLabel: "关闭并继续",
       secondary: false,
     });
+    this.renderLookupDetails(data);
+    this.prependSpeakButton(word);
     this.openTip(anchor);
   }
 
@@ -801,6 +825,115 @@ export class SubtitleOverlay {
     btn.textContent = opts.closeLabel;
     if (opts.secondary) btn.className = "secondary";
     this.tipActionsEl.appendChild(btn);
+  }
+
+  private renderLookupDetails(data: LookupResponse): void {
+    this.tipBodyEl.replaceChildren();
+    this.appendLookupSection("本句", data.meaning_in_context || data.gloss || "（无释义）");
+    if (data.gloss && data.gloss !== data.meaning_in_context) {
+      this.appendLookupSection("词典义", data.gloss);
+    }
+    if (data.word_parts?.length) {
+      const section = document.createElement("div");
+      section.className = "lookup-section";
+      const label = document.createElement("span");
+      label.className = "lookup-label";
+      label.textContent = "构词";
+      const parts = document.createElement("div");
+      parts.className = "lookup-parts";
+      for (const item of data.word_parts) {
+        const part = document.createElement("span");
+        part.className = "lookup-part";
+        part.textContent = `${item.part}：${item.meaning}`;
+        parts.appendChild(part);
+      }
+      section.append(label, parts);
+      this.tipBodyEl.appendChild(section);
+    }
+    this.appendLookupSection("词源", data.etymology || "暂无可靠拆解");
+    if (data.mnemonic) {
+      this.appendLookupSection(
+        data.mnemonic_kind === "evidence_based" ? "构词助记" : "联想助记",
+        data.mnemonic,
+      );
+    }
+    const validSources = (data.sources || []).filter(
+      (source) => /^https:\/\//.test(source.url) && source.name,
+    );
+    if (validSources.length) {
+      const section = document.createElement("div");
+      section.className = "lookup-section lookup-sources";
+      for (const source of validSources) {
+        const link = document.createElement("a");
+        link.href = source.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = `来源：${source.name}`;
+        section.appendChild(link);
+      }
+      this.tipBodyEl.appendChild(section);
+    }
+    for (const warning of data.warnings || []) {
+      const line = document.createElement("div");
+      line.className = "lookup-warning";
+      line.textContent = warning;
+      this.tipBodyEl.appendChild(line);
+    }
+  }
+
+  private appendLookupSection(labelText: string, value: string): void {
+    if (!value) return;
+    const section = document.createElement("div");
+    section.className = "lookup-section";
+    const label = document.createElement("span");
+    label.className = "lookup-label";
+    label.textContent = labelText;
+    const content = document.createElement("div");
+    content.textContent = value;
+    section.append(label, content);
+    this.tipBodyEl.appendChild(section);
+  }
+
+  private prependSpeakButton(word: string): void {
+    const button = document.createElement("button");
+    button.dataset.action = "speak";
+    button.dataset.word = word;
+    button.textContent = "▶";
+    button.title = "朗读单词";
+    button.setAttribute("aria-label", "朗读单词");
+    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+      button.disabled = true;
+      button.title = "浏览器不支持系统语音";
+    }
+    this.tipActionsEl.prepend(button);
+  }
+
+  private toggleSpeech(word: string, button: HTMLButtonElement): void {
+    if (!word || !("speechSynthesis" in window)) return;
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      button.textContent = "▶";
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(word);
+    const voices = window.speechSynthesis.getVoices();
+    utterance.voice =
+      voices.find((voice) => voice.lang.toLowerCase() === "en-us") ||
+      voices.find((voice) => voice.lang.toLowerCase() === "en-gb") ||
+      voices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ||
+      null;
+    utterance.lang = utterance.voice?.lang || "en-US";
+    utterance.onstart = () => {
+      button.textContent = "■";
+      button.title = "停止朗读";
+    };
+    const reset = () => {
+      button.textContent = "▶";
+      button.title = "朗读单词";
+    };
+    utterance.onend = reset;
+    utterance.onerror = reset;
+    window.speechSynthesis.speak(utterance);
   }
 
   private openTip(anchor: DOMRect): void {

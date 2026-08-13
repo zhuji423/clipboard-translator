@@ -56,7 +56,7 @@ class PairingSession:
     expires_at: float
 
 
-LookupHandler = Callable[[str, str, str], dict[str, Any]]
+LookupHandler = Callable[[str, str, str, str], dict[str, Any]]
 TranslateHandler = Callable[[TranslationRequest], None]
 TranslateInlineHandler = Callable[[TranslationRequest], dict[str, Any]]
 ConfigProvider = Callable[[], BridgeConfig]
@@ -356,11 +356,15 @@ class BrowserBridge:
                     target_lang = str(
                         data.get("target_lang") or bridge._target_lang_provider()
                     ).strip() or "zh"
+                    source = str(data.get("source") or "youtube").strip()
+                    if source not in ("web", "youtube"):
+                        self._send(400, {"error": "source 仅支持 web 或 youtube"})
+                        return
                     if not word:
                         self._send(400, {"error": "word 不能为空"})
                         return
                     try:
-                        result = bridge._on_lookup(word, context, target_lang)
+                        result = bridge._on_lookup(word, context, target_lang, source)
                     except Exception as exc:  # noqa: BLE001
                         self._send(502, {"error": str(exc)})
                         return

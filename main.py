@@ -27,10 +27,12 @@ from cache import LruCache
 from config import (
     BridgeSettings,
     Config,
+    DictionarySettings,
     LlmConfig,
     load_config,
     save_bridge_settings,
     save_bridge_token,
+    save_dictionary_settings,
     save_font_size,
     save_llm_settings,
     save_manual_input_hotkey,
@@ -49,7 +51,12 @@ from paths import app_icon_path, ensure_user_config, is_frozen
 from platform_ui import ui_font
 from pricing import estimate_cost, format_billing_line, format_status_lines
 from speech import SpeechService
-from settings_dialog import BridgeSettingsValues, LlmSettingsValues, SettingsDialog
+from settings_dialog import (
+    BridgeSettingsValues,
+    DictionarySettingsValues,
+    LlmSettingsValues,
+    SettingsDialog,
+)
 from translator import OpenAICompatTranslator, UsageInfo
 from translation_context import (
     RollingTranslationContext,
@@ -267,7 +274,7 @@ class AppController(QObject):
         self._update_download_worker: UpdateDownloadWorker | None = None
         self._update_progress: QProgressDialog | None = None
         self._pending_release: ReleaseInfo | None = None
-        self._lookup = WordLookupService(cfg.llm)
+        self._lookup = WordLookupService(cfg.llm, cfg.dictionary)
         self._lookup_cache = LruCache(max(32, cfg.app.cache_size))
         self._settings_dialog: SettingsDialog | None = None
         self._hotkey_manager = GlobalHotkeyManager(parent=self)
@@ -525,10 +532,22 @@ class AppController(QObject):
         self.bridge_lookup_recorded.emit()
         return {"translation": translation}
 
-    def _bridge_lookup(self, word: str, context: str, target_lang: str) -> dict:
+    def _bridge_lookup(
+        self,
+        word: str,
+        context: str,
+        target_lang: str,
+        source: str = "youtube",
+    ) -> dict:
         word = normalize_word(word)
         context = normalize_context(context)
-        key = cache_key(target_lang, word, context)
+        key = cache_key(
+            target_lang,
+            word,
+            context,
+            source,
+            self._lookup.data_version,
+        )
         cached = self._lookup_cache.get(key)
         if cached is not None:
             try:
@@ -537,6 +556,7 @@ class AppController(QObject):
                     self._record_lookup_history(
                         word,
                         context,
+                        source,
                         data,
                         UsageInfo(),
                         local_cache=True,
@@ -545,12 +565,13 @@ class AppController(QObject):
             except Exception:
                 pass
 
-        result = self._lookup.lookup(word, context, target_lang)
+        result = self._lookup.lookup(word, context, target_lang, source)
         payload = result.to_dict()
         self._lookup_cache.put(key, json.dumps(payload, ensure_ascii=False))
         self._record_lookup_history(
             word,
             context,
+            source,
             payload,
             result.usage,
             local_cache=False,
@@ -561,20 +582,21 @@ class AppController(QObject):
         self,
         word: str,
         context: str,
+        lookup_source: str,
         payload: dict,
         usage: UsageInfo,
         *,
         local_cache: bool,
     ) -> None:
         meaning = str(payload.get("meaning_in_context") or payload.get("gloss") or "")
-        source = word if not context else f"{word}  |  {context}"
+        display_source = word if not context else f"{word}  |  {context}"
         if local_cache:
             self._history.append(
                 HistoryEntry(
                     ts=now_ts(),
-                    source=source,
+                    source=display_source,
                     result=meaning,
-                    note="youtube_word_lookup|local_cache",
+                    note=f"{lookup_source}_word_lookup|local_cache",
                 )
             )
             self.bridge_lookup_recorded.emit()
@@ -585,14 +607,14 @@ class AppController(QObject):
         self._history.append(
             HistoryEntry(
                 ts=now_ts(),
-                source=source,
+                source=display_source,
                 result=meaning,
                 hit=cost.hit,
                 miss=cost.miss,
                 completion=cost.completion,
                 cost_yuan=cost.cost_yuan,
                 saved_yuan=cost.saved_yuan,
-                note="youtube_word_lookup",
+                note=f"{lookup_source}_word_lookup",
             )
         )
         self.bridge_lookup_recorded.emit()
@@ -749,6 +771,7 @@ class AppController(QObject):
             font_size=self._font_size,
             llm=self._cfg.llm,
             bridge=self._cfg.bridge,
+            dictionary=self._cfg.dictionary,
             question_hotkey=self._cfg.app.question_hotkey,
             manual_input_hotkey=self._cfg.manual_input.hotkey,
             question_hotkey_applier=self.apply_question_hotkey,
@@ -759,6 +782,7 @@ class AppController(QObject):
         dialog.font_size_changed.connect(self.apply_font_size)
         dialog.llm_settings_changed.connect(self.apply_llm_settings)
         dialog.bridge_settings_changed.connect(self.apply_bridge_settings)
+        dialog.dictionary_settings_changed.connect(self.apply_dictionary_settings)
         dialog.check_updates_requested.connect(self.check_for_updates)
         dialog.start_pairing_requested.connect(self.start_bridge_pairing)
         dialog.revoke_pairing_requested.connect(self.revoke_bridge_pairing)
@@ -1025,6 +1049,24 @@ class AppController(QObject):
             ),
         )
         self._bridge.restart()
+
+    @Slot(object)
+    def apply_dictionary_settings(self, values: object) -> None:
+        if not isinstance(values, DictionarySettingsValues):
+            return
+        try:
+            save_dictionary_settings(values.merriam_webster_api_key)
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(self._window, "设置", f"保存词典设置失败：{exc}")
+            return
+        dictionary = DictionarySettings(
+            merriam_webster_api_key=values.merriam_webster_api_key,
+        )
+        if dictionary == self._cfg.dictionary:
+            return
+        self._cfg = replace(self._cfg, dictionary=dictionary)
+        self._lookup.update_dictionary_config(dictionary)
+        self._lookup_cache.clear()
 
     @Slot()
     def start_bridge_pairing(self) -> None:
