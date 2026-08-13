@@ -13,6 +13,7 @@
 | [immersive-subtitles.md](immersive-subtitles.md) | 待排期 | TBD | 对标 Language Reactor 的沉浸字幕（双语叠字 / B 站 / 学习向播放） |
 | [account-sync-byok.md](account-sync-byok.md) | 待排期 | TBD | 自建账户 + BYOK 配置与历史多端同步 |
 | [activity-achievements-recall.md](activity-achievements-recall.md) | 待排期 | TBD | 粘贴/翻译频次绿格子成就 + 偶发回想推送 |
+| [usage-billing-dashboard.md](usage-billing-dashboard.md) | 待排期 | TBD | GitHub 风格的每日用量、费用、历史明细与周期总结网页 |
 
 ## 各项说明
 
@@ -48,6 +49,17 @@
   - 连续天数与轻量成就徽章 + 托盘解锁提示
   - 偶发回想推送（时间锚点 / 随机稀疏），隐私默认偏保守
   - Phase A 先绿格子，再成就，再回想
+
+### 4. 用量与计费总结网页（待排期）
+
+- **计划**：[usage-billing-dashboard.md](usage-billing-dashboard.md)
+- **目标体验**：点击主窗口计费入口后打开网页，用 GitHub 风格的每日方格展示调用次数或估算费用，并可下钻到当日记录。
+- **待做要点**：
+  - 日历热力图支持次数 / 费用口径切换
+  - 每日汇总与翻译、查词、问答等逐条记录
+  - 周报 / 月报与使用习惯总结
+  - 本机估算、厂商账单、多设备数据的口径区分
+  - 默认本地处理，敏感内容可隐藏，LLM 内容总结可关闭
 
 ## 已迁出（完成）
 

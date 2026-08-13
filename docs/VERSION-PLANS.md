@@ -270,6 +270,7 @@
 | [`immersive-subtitles`](todo/immersive-subtitles.md) | todo | TBD | 沉浸字幕大图；点词/划词 MVP 已在 0.8.x 部分落地 |
 | [`account-sync-byok`](todo/account-sync-byok.md) | todo | TBD | 自建账户与 BYOK 同步 |
 | [`activity-achievements-recall`](todo/activity-achievements-recall.md) | todo | TBD | 绿格子成就 + 偶发回想推送（本地，隐私优先） |
+| [`usage-billing-dashboard`](todo/usage-billing-dashboard.md) | todo | TBD | GitHub 风格用量日历、费用明细与周期总结网页 |
 
 归档快照仍保留在 [`plans/history/`](plans/history/)（入库时原文）。
 
